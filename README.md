@@ -94,7 +94,7 @@ You define your Pydantic v2 data models once. Both your OpenAPI specification (`
 ## 📦 Installation
 
 ```bash
-pip install fastapi-mcp
+pip install fastapi-fastmcp
 ```
 
 *(Works with the latest releases of `fastapi`, `mcp`, `pydantic`, `httpx`, and `uvicorn`)*

@@ -1,26 +1,51 @@
 [build-system]
-requires = ["setuptools"]
+requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "fastapi-mcp"
+name = "fastapi-fastmcp"
 version = "0.1.0"
-description = "Seamless bridge between FastAPI and FastMCP / Model Context Protocol."
+description = "The unified bridge between FastAPI and FastMCP / Model Context Protocol."
 readme = "README.md"
-authors = [{ name = "FastAPI-MCP Contributors" }]
+authors = [{ name = "Manav Mehta" }]
 license = { text = "MIT" }
 requires-python = ">=3.10"
+keywords = ["fastapi", "mcp", "fastmcp", "model-context-protocol", "ai", "agents", "llm", "claude", "cursor"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Internet :: WWW/HTTP :: HTTP Servers",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
 dependencies = [
-    "fastapi",
-    "mcp",
-    "httpx",
-    "pydantic",
-    "starlette",
-    "uvicorn",
+    "fastapi>=0.100.0",
+    "mcp>=1.0.0",
+    "httpx>=0.25.0",
+    "pydantic>=2.0.0",
+    "starlette>=0.27.0",
+    "uvicorn>=0.22.0",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
 ]
 
 [project.scripts]
 fastapi-mcp = "fastapi_mcp.cli:main"
+fastapi-fastmcp = "fastapi_mcp.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/manavmehta2403/fastapi-mcp"
+Repository = "https://github.com/manavmehta2403/fastapi-mcp"
+Issues = "https://github.com/manavmehta2403/fastapi-mcp/issues"
 
 [tool.setuptools.packages.find]
 where = ["."]
