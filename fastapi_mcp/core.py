@@ -1,4 +1,5 @@
-import asyncio
+"""FastAPI integration with MCP server support."""
+
 from contextlib import asynccontextmanager
 import inspect
 from typing import (
@@ -7,18 +8,12 @@ from typing import (
     Dict,
     List,
     Optional,
-    Sequence,
     Set,
     Tuple,
-    Type,
-    Union,
 )
 from fastapi import FastAPI
-from fastapi.datastructures import Default
 from fastapi.routing import APIRoute
 from mcp.server.mcpserver import MCPServer
-from starlette.responses import JSONResponse, Response
-from starlette.routing import BaseRoute
 
 from .scanner import RouteScanner, sanitize_tool_name
 

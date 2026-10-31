@@ -17,6 +17,20 @@ def sanitize_tool_name(name: str) -> str:
     return clean[:64]
 
 
+def _extract_param_type(p: Any) -> Any:
+    """Extract Python type annotation from FastAPI / Pydantic param across v1 and v2."""
+    field_info = getattr(p, "field_info", None)
+    if field_info is not None:
+        ann = getattr(field_info, "annotation", None)
+        if ann is not None and ann is not PydanticUndefined:
+            return ann
+    if getattr(p, "annotation", None) is not None:
+        return p.annotation
+    if hasattr(p, "type_"):
+        return p.type_
+    return Any
+
+
 class RouteScanner:
     """Scans and converts FastAPI routes into MCP tools."""
 
@@ -101,7 +115,8 @@ class RouteScanner:
         for p in dep.path_params:
             path_param_names.add(p.name)
             desc = getattr(p.field_info, "description", None)
-            ann = Annotated[p.type_, Field(description=desc)] if desc else p.type_
+            p_type = _extract_param_type(p)
+            ann = Annotated[p_type, Field(description=desc)] if desc else p_type
             annotations[p.name] = ann
             raw_params.append((p.name, ann, inspect.Parameter.empty, True))
 
@@ -110,7 +125,8 @@ class RouteScanner:
         for p in dep.query_params:
             query_param_names.add(p.name)
             desc = getattr(p.field_info, "description", None)
-            ann = Annotated[p.type_, Field(description=desc)] if desc else p.type_
+            p_type = _extract_param_type(p)
+            ann = Annotated[p_type, Field(description=desc)] if desc else p_type
             annotations[p.name] = ann
             default = p.field_info.default
             is_req = default is PydanticUndefined
@@ -123,7 +139,8 @@ class RouteScanner:
         for p in dep.body_params:
             body_param_names.add(p.name)
             desc = getattr(p.field_info, "description", None)
-            ann = Annotated[p.type_, Field(description=desc)] if desc else p.type_
+            p_type = _extract_param_type(p)
+            ann = Annotated[p_type, Field(description=desc)] if desc else p_type
             annotations[p.name] = ann
             default = p.field_info.default
             is_req = default is PydanticUndefined

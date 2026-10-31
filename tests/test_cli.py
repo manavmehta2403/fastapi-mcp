@@ -1,11 +1,25 @@
 import os
 import subprocess
 import sys
+import pytest
+
+
+def test_load_app_chains_module_import_error():
+    from fastapi_mcp.cli import load_app
+
+    missing_module = "__fastapi_mcp_test_missing_import__"
+    with pytest.raises(RuntimeError) as exc_info:
+        load_app(f"{missing_module}:app")
+
+    assert isinstance(exc_info.value.__cause__, ModuleNotFoundError)
+    assert exc_info.value.__cause__.name == missing_module
 
 
 def test_cli_inspect():
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     env = os.environ.copy()
-    env["PYTHONPATH"] = r"c:\Users\manav\Downloads\fastapi-mcp"
+    existing_pp = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = f"{project_root}{os.pathsep}{existing_pp}" if existing_pp else project_root
 
     result = subprocess.run(
         [
@@ -19,7 +33,7 @@ def test_cli_inspect():
         text=True,
         check=True,
         env=env,
-        cwd=r"c:\Users\manav\Downloads\fastapi-mcp",
+        cwd=project_root,
     )
     print("CLI inspect output:")
     print(result.stdout)

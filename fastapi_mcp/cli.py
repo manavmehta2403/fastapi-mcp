@@ -1,3 +1,5 @@
+"""Command-line interface for running and inspecting FastAPI-MCP apps."""
+
 import argparse
 import asyncio
 import importlib
@@ -27,7 +29,7 @@ def load_app(app_str: str) -> Any:
     try:
         module = importlib.import_module(module_name)
     except ModuleNotFoundError as e:
-        raise RuntimeError(f"Could not import module '{module_name}': {e}")
+        raise RuntimeError(f"Could not import module '{module_name}': {e}") from e
 
     if not hasattr(module, attr_name):
         raise AttributeError(f"Module '{module_name}' has no attribute '{attr_name}'")
@@ -39,6 +41,7 @@ def load_app(app_str: str) -> Any:
 
 
 def main() -> None:
+    """Run the FastAPI-MCP command-line interface."""
     parser = argparse.ArgumentParser(
         prog="fastapi-mcp",
         description="FastAPI-MCP: Run or inspect FastAPI applications as MCP servers",
