@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fastapi-mcp"
+version = "0.1.0"
+description = "Seamless bridge between FastAPI and FastMCP / Model Context Protocol."
+readme = "README.md"
+authors = [{ name = "FastAPI-MCP Contributors" }]
+license = { text = "MIT" }
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi",
+    "mcp",
+    "httpx",
+    "pydantic",
+    "starlette",
+    "uvicorn",
+]
+
+[project.scripts]
+fastapi-mcp = "fastapi_mcp.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["fastapi_mcp*"]
