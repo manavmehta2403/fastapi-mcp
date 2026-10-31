@@ -36,7 +36,12 @@ dependencies = [
 test = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
+    "pytest-cov>=4.0.0",
+    "pylint>=3.0.0",
 ]
+
+[tool.poetry]
+packages = [{ include = "fastapi_mcp" }]
 
 [project.scripts]
 fastapi-mcp = "fastapi_mcp.cli:main"
@@ -50,3 +55,21 @@ Issues = "https://github.com/manavmehta2403/fastapi-mcp/issues"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["fastapi_mcp*"]
+
+[tool.pylint.main]
+max-line-length = 100
+
+[tool.pylint.design]
+max-args = 15
+max-attributes = 15
+max-locals = 25
+max-statements = 60
+
+[tool.pylint.messages_control]
+disable = [
+    "import-error",
+    "too-few-public-methods",
+    "too-many-arguments",
+    "too-many-positional-arguments",
+    "too-many-instance-attributes",
+]

@@ -2,6 +2,7 @@
 
 from contextlib import asynccontextmanager
 import inspect
+import json
 from typing import (
     Any,
     Callable,
@@ -14,8 +15,18 @@ from typing import (
 from fastapi import FastAPI
 from fastapi.routing import APIRoute
 from mcp.server.mcpserver import MCPServer
+from pydantic import BaseModel
+from starlette.responses import HTMLResponse
 
 from .scanner import RouteScanner, sanitize_tool_name
+from .ui import get_mcp_swagger_html
+
+
+class ToolCallRequest(BaseModel):
+    """Payload schema for executing MCP tools via the Swagger UI."""
+
+    name: str
+    arguments: Dict[str, Any] = {}
 
 
 class FastAPIMCP(FastAPI):
@@ -47,6 +58,7 @@ class FastAPIMCP(FastAPI):
         lifespan: Optional[Callable[[Any], Any]] = None,
         **kwargs: Any,
     ):
+        """Initialize FastAPIMCP instance."""
         self._target_app = existing_app or self
         self.mcp_name = mcp_name
         self.mcp_server = MCPServer(name=mcp_name, description=mcp_description)
@@ -75,7 +87,6 @@ class FastAPIMCP(FastAPI):
             tool_name_prefix=tool_name_prefix,
         )
 
-        # Custom lifespan to automatically scan routes on startup
         user_lifespan = lifespan
 
         @asynccontextmanager
@@ -92,7 +103,6 @@ class FastAPIMCP(FastAPI):
         if existing_app is None:
             super().__init__(*args, lifespan=unified_lifespan, **kwargs)
         else:
-            # If wrapping an existing app, we can immediately scan existing routes
             if self.auto_scan:
                 self.scan_routes()
 
@@ -137,15 +147,41 @@ class FastAPIMCP(FastAPI):
             self.scan_routes()
         return self._tool_catalog
 
+    def _extract_param_schema(self, runner: Callable) -> Dict[str, Any]:
+        """Extract parameter names, types, and defaults from a runner callable."""
+        sig = getattr(runner, "__signature__", None)
+        params_info: Dict[str, Any] = {}
+        if not sig:
+            return params_info
+
+        for p_name, p in sig.parameters.items():
+            if p.annotation != inspect.Parameter.empty:
+                p_type = getattr(p.annotation, "__name__", str(p.annotation))
+            else:
+                p_type = "Any"
+
+            is_req = p.default == inspect.Parameter.empty
+            default_val = None if is_req else (
+                str(p.default)
+                if not isinstance(p.default, (int, float, bool, str, list, dict, type(None)))
+                else p.default
+            )
+            params_info[p_name] = {
+                "type": str(p_type),
+                "required": is_req,
+                "default": default_val,
+            }
+        return params_info
+
     def _register_librarian_meta_tools(self) -> None:
         """Registers the 3 Librarian meta-tools to prevent LLM context-window bloat."""
         if "_librarian_registered" in self._registered_tool_names:
             return
 
         async def list_api_categories() -> Dict[str, Any]:
-            """List available API tool categories (OpenAPI tags) with tool counts and summaries to prevent context bloat."""
+            """List available API tool categories (tags) with tool counts and summaries."""
             categories: Dict[str, List[Dict[str, str]]] = {}
-            for name, (t_name, t_doc, runner) in self._tool_catalog.items():
+            for name, (_, t_doc, runner) in self._tool_catalog.items():
                 tags = getattr(runner, "_mcp_tags", []) or ["default"]
                 summary = (t_doc.split("\n")[0] if t_doc else "").strip()
                 for tag in tags:
@@ -157,19 +193,22 @@ class FastAPIMCP(FastAPI):
                 {"category": cat, "tool_count": len(t_list), "tools": t_list}
                 for cat, t_list in sorted(categories.items())
             ]
+            hint = "Use 'search_api_tools(query, category)' to inspect parameter schemas."
             return {
                 "categories": result,
                 "total_tools": len(self._tool_catalog),
-                "hint": "Use 'search_api_tools(query, category)' to inspect parameter schemas before calling 'execute_api_tool'.",
+                "hint": hint,
             }
 
-        async def search_api_tools(query: Optional[str] = None, category: Optional[str] = None) -> Dict[str, Any]:
-            """Search registered API tools by name, description, tags, or endpoint path. Returns schema and parameters."""
+        async def search_api_tools(
+            query: Optional[str] = None, category: Optional[str] = None
+        ) -> Dict[str, Any]:
+            """Search registered API tools by name, description, tags, or endpoint path."""
             matches = []
             q = (query or "").lower().strip()
             cat_filter = (category or "").lower().strip()
 
-            for name, (t_name, t_doc, runner) in self._tool_catalog.items():
+            for name, (_, t_doc, runner) in self._tool_catalog.items():
                 tags = [t.lower() for t in getattr(runner, "_mcp_tags", []) or ["default"]]
                 path = getattr(runner, "_mcp_path", "")
                 method = getattr(runner, "_mcp_method", "")
@@ -185,19 +224,7 @@ class FastAPIMCP(FastAPI):
                     if not (match_name or match_doc or match_path or match_tag):
                         continue
 
-                sig = getattr(runner, "__signature__", None)
-                params_info = {}
-                if sig:
-                    for p_name, p in sig.parameters.items():
-                        p_type = getattr(p.annotation, "__name__", str(p.annotation)) if p.annotation != inspect.Parameter.empty else "Any"
-                        params_info[p_name] = {
-                            "type": str(p_type),
-                            "required": p.default == inspect.Parameter.empty,
-                            "default": None if p.default == inspect.Parameter.empty else (
-                                str(p.default) if not isinstance(p.default, (int, float, bool, str, list, dict, type(None))) else p.default
-                            ),
-                        }
-
+                params_info = self._extract_param_schema(runner)
                 matches.append({
                     "name": name,
                     "method": method,
@@ -210,18 +237,20 @@ class FastAPIMCP(FastAPI):
             return {
                 "tools": matches,
                 "count": len(matches),
-                "hint": "Call 'execute_api_tool(tool_name, arguments)' with the required parameters.",
+                "hint": "Call 'execute_api_tool(tool_name, arguments)' with required parameters.",
             }
 
-        async def execute_api_tool(tool_name: str, arguments: Optional[Dict[str, Any]] = None) -> Any:
-            """Execute an API tool discovered via search_api_tools by its name with the specified arguments."""
+        async def execute_api_tool(
+            tool_name: str, arguments: Optional[Dict[str, Any]] = None
+        ) -> Any:
+            """Execute an API tool discovered via search_api_tools by its name."""
             args = arguments or {}
             if tool_name not in self._tool_catalog:
                 return {
                     "is_error": True,
                     "error": f"Tool '{tool_name}' not found in catalog.",
                     "available_tools": list(self._tool_catalog.keys())[:10],
-                    "hint": "Call list_api_categories() or search_api_tools(query) to find valid tool names.",
+                    "hint": "Call list_api_categories() or search_api_tools() for valid names.",
                 }
 
             _, _, runner = self._tool_catalog[tool_name]
@@ -229,7 +258,7 @@ class FastAPIMCP(FastAPI):
                 if inspect.iscoroutinefunction(runner):
                     return await runner(**args)
                 return runner(**args)
-            except Exception as e:
+            except Exception as e:  # pylint: disable=broad-exception-caught
                 return {
                     "is_error": True,
                     "tool_name": tool_name,
@@ -239,17 +268,17 @@ class FastAPIMCP(FastAPI):
         self.mcp_server.add_tool(
             list_api_categories,
             name="list_api_categories",
-            description="List available API tool categories (tags) with tool counts and summaries to prevent context bloat.",
+            description="List available API tool categories (tags) to prevent context bloat.",
         )
         self.mcp_server.add_tool(
             search_api_tools,
             name="search_api_tools",
-            description="Search registered API tools by name, description, tags, or endpoint path. Returns schema and parameters.",
+            description="Search registered API tools by name, description, tags, or path.",
         )
         self.mcp_server.add_tool(
             execute_api_tool,
             name="execute_api_tool",
-            description="Execute an API tool discovered via search_api_tools by its name with the specified arguments.",
+            description="Execute an API tool discovered via search_api_tools by its name.",
         )
         self._registered_tool_names.add("_librarian_registered")
 
@@ -289,12 +318,10 @@ class FastAPIMCP(FastAPI):
             name = sanitize_tool_name(tool_name or func.__name__)
             doc = tool_description or func.__doc__ or f"{methods[0]} {path}"
 
-            # Attach metadata to endpoint function
-            func._mcp_tool_name = name
-            func._mcp_tool_description = doc
-            func._is_mcp_api_tool = True
+            setattr(func, "_mcp_tool_name", name)
+            setattr(func, "_mcp_tool_description", doc)
+            setattr(func, "_is_mcp_api_tool", True)
 
-            # 1. Register as FastAPI route on the application
             self._target_app.add_api_route(
                 path=path,
                 endpoint=func,
@@ -302,17 +329,16 @@ class FastAPIMCP(FastAPI):
                 **route_kwargs,
             )
 
-            # 2. Register tool with scanner immediately
             route_matches = [
                 r for r in self._target_app.routes
                 if isinstance(r, APIRoute) and r.endpoint == func and r.path == path
             ]
             if route_matches:
-                t_name, t_doc, runner = self.scanner.convert_route(route_matches[-1])
+                _, _, runner = self.scanner.convert_route(route_matches[-1])
             else:
-                t_name, t_doc, runner = name, doc, func
+                runner = func
 
-            self._tool_catalog[name] = (t_name, t_doc, runner)
+            self._tool_catalog[name] = (name, doc, runner)
 
             if not self.librarian:
                 if name not in self._registered_tool_names:
@@ -362,14 +388,6 @@ class FastAPIMCP(FastAPI):
         sse_path: str = "/sse",
     ) -> None:
         """Registers the interactive MCP Swagger UI at {mcp_path}/docs and {mcp_path}/ui."""
-        from pydantic import BaseModel
-        from starlette.responses import HTMLResponse
-        from .ui import get_mcp_swagger_html
-
-        class ToolCallRequest(BaseModel):
-            name: str
-            arguments: Dict[str, Any] = {}
-
         docs_path = f"{mcp_path.rstrip('/')}/docs"
         ui_path = f"{mcp_path.rstrip('/')}/ui"
         call_path = f"{mcp_path.rstrip('/')}/ui/call"
@@ -378,7 +396,7 @@ class FastAPIMCP(FastAPI):
         @target_app.get(ui_path, response_class=HTMLResponse, include_in_schema=False)
         async def mcp_swagger_docs():
             tools = await self.list_tools()
-            title = self.mcp_name + (" [Librarian Active: 3 Meta-Tools]" if self.librarian else "")
+            title = self.mcp_name + (" [Librarian Active]" if self.librarian else "")
             html = get_mcp_swagger_html(
                 title=title,
                 tools=tools,
@@ -395,12 +413,11 @@ class FastAPIMCP(FastAPI):
                 output_texts = [c.text for c in getattr(res, "content", []) if hasattr(c, "text")]
                 output_str = "\n".join(output_texts) if output_texts else str(res)
                 try:
-                    import json
                     parsed_json = json.loads(output_str)
                     return {"success": True, "result": parsed_json}
-                except Exception:
+                except Exception:  # pylint: disable=broad-exception-caught
                     return {"success": True, "result": output_str}
-            except Exception as e:
+            except Exception as e:  # pylint: disable=broad-exception-caught
                 return {"is_error": True, "error": str(e)}
 
     def mount_to(
@@ -455,10 +472,7 @@ class FastAPIMCP(FastAPI):
         return await self.mcp_server.call_tool(name, args)
 
     def run_stdio(self) -> None:
-        """Run the MCP server over standard input/output (stdio).
-
-        Ideal for Claude Desktop, Cursor, or local CLI agents without starting a network port.
-        """
+        """Run the MCP server over standard input/output (stdio)."""
         if not self._scanned and self.auto_scan:
             self.scan_routes()
         self.mcp_server.run(transport="stdio")

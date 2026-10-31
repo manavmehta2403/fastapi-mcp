@@ -12,17 +12,27 @@ from .core import FastAPIMCP
 
 
 def load_app(app_str: str) -> Any:
-    """Loads an application instance from a 'module:attribute' string."""
+    """Loads an application instance from a 'module:attribute' string.
+
+    Args:
+        app_str: Path specification, e.g. 'main:app' or 'app.main:get_app()'
+
+    Returns:
+        Loaded FastAPI or FastAPIMCP instance.
+    """
     if ":" not in app_str:
-        raise ValueError(f"Invalid app string format '{app_str}'. Expected 'module:attribute' (e.g., 'main:app')")
+        msg = (
+            f"Invalid app string format '{app_str}'. "
+            "Expected 'module:attribute' (e.g., 'main:app')"
+        )
+        raise ValueError(msg)
 
     module_name, attr_name = app_str.split(":", 1)
     is_factory = False
     if attr_name.endswith("()"):
         attr_name = attr_name[:-2]
         is_factory = True
-    
-    # Ensure current working directory is in sys.path
+
     if "." not in sys.path:
         sys.path.insert(0, ".")
 
@@ -40,7 +50,24 @@ def load_app(app_str: str) -> Any:
     return app
 
 
-def main() -> None:
+def _print_tools_summary(mcp: FastAPIMCP, tools: list) -> None:
+    """Format and print tools and parameter schemas to terminal."""
+    print(f"=== FastAPI-MCP Server: {mcp.mcp_name} ===")
+    print(f"Found {len(tools)} tools:")
+    for t in tools:
+        print(f"\n* Tool: {t.name}")
+        print(f"  Description: {t.description}")
+        props = t.input_schema.get("properties", {})
+        reqs = t.input_schema.get("required", [])
+        print(f"  Arguments ({len(props)}):")
+        for p_name, p_info in props.items():
+            req_str = " (required)" if p_name in reqs else f" (default: {p_info.get('default')})"
+            desc_val = p_info.get("description")
+            desc_str = f" - {desc_val}" if desc_val else ""
+            print(f"    - {p_name}: {p_info.get('type')}{req_str}{desc_str}")
+
+
+def main(args_list: Any = None) -> None:
     """Run the FastAPI-MCP command-line interface."""
     parser = argparse.ArgumentParser(
         prog="fastapi-mcp",
@@ -61,18 +88,26 @@ def main() -> None:
     run_parser.add_argument("--name", help="Custom MCP server name", default="FastAPIMCP")
 
     # inspect command
-    inspect_parser = subparsers.add_parser("inspect", help="Inspect and list tools generated from the application")
+    inspect_parser = subparsers.add_parser(
+        "inspect", help="Inspect and list tools generated from the application"
+    )
     inspect_parser.add_argument("app", help="Application target, e.g. 'main:app'")
-    inspect_parser.add_argument("--json", action="store_true", help="Output full tool definitions as JSON")
+    inspect_parser.add_argument(
+        "--json", action="store_true", help="Output full tool definitions as JSON"
+    )
 
-    args = parser.parse_args()
-
+    args = parser.parse_args(args_list)
     app = load_app(args.app)
 
     if isinstance(app, FastAPIMCP):
         mcp = app
     elif isinstance(app, FastAPI):
-        mcp = FastAPIMCP.bind(app, name=getattr(args, "name", "FastAPIMCP"), mount_path=None, mount_sse_path=None)
+        mcp = FastAPIMCP.bind(
+            app,
+            name=getattr(args, "name", "FastAPIMCP"),
+            mount_path=None,
+            mount_sse_path=None,
+        )
     else:
         raise TypeError(f"Target object must be a FastAPI or FastAPIMCP instance, got {type(app)}")
 
@@ -83,18 +118,7 @@ def main() -> None:
                 data = [t.model_dump() for t in tools]
                 print(json.dumps(data, indent=2))
             else:
-                print(f"=== FastAPI-MCP Server: {mcp.mcp_name} ===")
-                print(f"Found {len(tools)} tools:")
-                for t in tools:
-                    print(f"\n* Tool: {t.name}")
-                    print(f"  Description: {t.description}")
-                    props = t.input_schema.get("properties", {})
-                    reqs = t.input_schema.get("required", [])
-                    print(f"  Arguments ({len(props)}):")
-                    for p_name, p_info in props.items():
-                        req_str = " (required)" if p_name in reqs else f" (default: {p_info.get('default')})"
-                        desc_str = f" - {p_info.get('description')}" if p_info.get("description") else ""
-                        print(f"    - {p_name}: {p_info.get('type')}{req_str}{desc_str}")
+                _print_tools_summary(mcp, tools)
 
         asyncio.run(do_inspect())
 

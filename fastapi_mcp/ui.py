@@ -4,6 +4,8 @@ Provides an interactive playground at `/mcp/docs` where developers can inspect
 registered tools, view schemas, fill in parameters, and execute tools live in the browser.
 """
 
+import json
+
 HTML_TEMPLATE = """<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -389,7 +391,7 @@ def get_mcp_swagger_html(
     call_url: str = "/mcp/ui/call",
 ) -> str:
     """Renders the interactive MCP Swagger HTML page."""
-    import json
+
     tools_json = json.dumps([t.model_dump() for t in tools])
     return HTML_TEMPLATE.replace("{title}", title)\
                         .replace("{tools_json}", tools_json)\

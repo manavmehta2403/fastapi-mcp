@@ -29,8 +29,12 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install . pytest pytest-asyncio httpx
+          pip install . pytest pytest-asyncio pytest-cov pylint httpx
 
-      - name: Run Pytest Test Suite
+      - name: Run Pytest Test Suite with Coverage (>=95%)
         run: |
-          pytest tests/ -v
+          pytest tests/ -v --cov=fastapi_mcp --cov-report=term-missing --cov-fail-under=95
+
+      - name: Run Pylint Quality Gate (>=9.5/10)
+        run: |
+          pylint fastapi_mcp --fail-under=9.5
