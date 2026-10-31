@@ -497,3 +497,45 @@ async def test_core_edge_branches(monkeypatch):
     monkeypatch.setattr(orphan_mcp.mcp_server, "run_stdio_async", dummy_async_stdio)
     await orphan_mcp.run_stdio_async()
     assert mock_async == ["async_stdio"]
+
+
+def test_lifespan_and_mounting_fallbacks(monkeypatch):
+    """Test unified lifespan execution with session manager and mounting fallbacks."""
+    from starlette.testclient import TestClient
+
+    # Lifespan with session manager mounted
+    app = FastAPIMCP()
+    app.mount_mcp(path="/mcp-test", sse_path="/sse-test")
+    with TestClient(app) as client:
+        resp = client.get("/mcp-test/docs")
+        assert resp.status_code == 200
+
+    # User custom lifespan combined with session manager
+    @asynccontextmanager
+    async def custom_lifespan(app_inst):
+        yield {"custom": True}
+
+    app_custom = FastAPIMCP(lifespan=custom_lifespan)
+    app_custom.mount_mcp(path="/mcp-custom")
+    with TestClient(app_custom):
+        pass
+
+    # TypeError fallbacks in mount_to and mount_mcp
+    class FakeMCPServer:
+        def sse_app(self, *args, **kwargs):
+            if "sse_path" in kwargs:
+                raise TypeError("No sse_path")
+            return FastAPI()
+
+        def streamable_http_app(self, *args, **kwargs):
+            if "streamable_http_path" in kwargs:
+                raise TypeError("No streamable_http_path")
+            return FastAPI()
+
+    app_fallback = FastAPIMCP()
+    monkeypatch.setattr(app_fallback, "mcp_server", FakeMCPServer())
+    app_fallback.mount_mcp(path="/mcp-fb", sse_path="/sse-fb", enable_ui=False)
+
+    target = FastAPI()
+    app_fallback.mount_to(target, path="/mcp-tgt", sse_path="/sse-tgt", enable_ui=False)
+

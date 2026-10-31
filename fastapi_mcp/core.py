@@ -99,11 +99,25 @@ class FastAPIMCP(FastAPI):
             if self.auto_scan and not self._scanned:
                 self.scan_routes()
 
-            if user_lifespan is not None:
-                async with user_lifespan(app) as maybe_state:
-                    yield maybe_state
+            session_cm = None
+            try:
+                session_cm = self.mcp_server.session_manager.run()
+            except (RuntimeError, AttributeError):
+                pass
+
+            if session_cm is not None:
+                async with session_cm:
+                    if user_lifespan is not None:
+                        async with user_lifespan(app) as maybe_state:
+                            yield maybe_state
+                    else:
+                        yield
             else:
-                yield
+                if user_lifespan is not None:
+                    async with user_lifespan(app) as maybe_state:
+                        yield maybe_state
+                else:
+                    yield
 
         if existing_app is None:
             super().__init__(*args, lifespan=unified_lifespan, **kwargs)
@@ -441,10 +455,18 @@ class FastAPIMCP(FastAPI):
             self._setup_ui_routes(target_app, mcp_path=path, sse_path=sse_path or "/sse")
 
         if sse_path:
-            target_app.mount(sse_path, self.mcp_server.sse_app())
+            try:
+                target_app.mount(sse_path, self.mcp_server.sse_app(sse_path="/"))
+            except TypeError:
+                target_app.mount(sse_path, self.mcp_server.sse_app())
 
         if path:
-            target_app.mount(path, self.mcp_server.streamable_http_app())
+            try:
+                target_app.mount(
+                    path, self.mcp_server.streamable_http_app(streamable_http_path="/")
+                )
+            except TypeError:
+                target_app.mount(path, self.mcp_server.streamable_http_app())
 
     def mount_mcp(
         self,
@@ -457,10 +479,18 @@ class FastAPIMCP(FastAPI):
             self._setup_ui_routes(self, mcp_path=path, sse_path=sse_path or "/sse")
 
         if sse_path:
-            super().mount(sse_path, self.mcp_server.sse_app())
+            try:
+                super().mount(sse_path, self.mcp_server.sse_app(sse_path="/"))
+            except TypeError:
+                super().mount(sse_path, self.mcp_server.sse_app())
 
         if path:
-            super().mount(path, self.mcp_server.streamable_http_app())
+            try:
+                super().mount(
+                    path, self.mcp_server.streamable_http_app(streamable_http_path="/")
+                )
+            except TypeError:
+                super().mount(path, self.mcp_server.streamable_http_app())
 
     async def list_tools(self) -> List[Any]:
         """List all registered MCP tools."""
