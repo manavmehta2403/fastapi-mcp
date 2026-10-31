@@ -31,9 +31,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install . pytest pytest-asyncio pytest-cov pylint httpx
 
-      - name: Run Pytest Test Suite with Coverage (>=95%)
+      - name: Run Pytest Test Suite with Coverage (>=96%)
         run: |
-          pytest tests/ -v --cov=fastapi_mcp --cov-report=term-missing --cov-fail-under=95
+          pytest tests/ -v --cov=fastapi_mcp --cov-report=term-missing --cov-fail-under=96
 
       - name: Run Pylint Quality Gate (>=9.5/10)
         run: |

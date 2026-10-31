@@ -84,6 +84,7 @@ class RouteScanner:
     def __init__(
         self,
         app: FastAPI,
+        *,
         include_tags: Optional[Set[str]] = None,
         exclude_tags: Optional[Set[str]] = None,
         include_paths: Optional[List[str]] = None,
@@ -140,7 +141,7 @@ class RouteScanner:
         route_tags = set(route.tags or [])
         if self.exclude_tags and (route_tags & self.exclude_tags):
             return False
-        if self.include_tags is not None and not bool(route_tags & self.include_tags):
+        if self.include_tags is not None and not route_tags.intersection(self.include_tags):
             return False
 
         return True

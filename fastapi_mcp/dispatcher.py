@@ -28,6 +28,7 @@ class ASGIDispatcher:
         app: FastAPI,
         method: str,
         path_template: str,
+        *,
         path_param_names: Set[str],
         query_param_names: Set[str],
         body_param_names: Set[str],

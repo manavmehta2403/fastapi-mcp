@@ -23,7 +23,12 @@ from .ui import get_mcp_swagger_html
 
 
 class ToolCallRequest(BaseModel):
-    """Payload schema for executing MCP tools via the Swagger UI."""
+    """Payload schema for executing MCP tools via the Swagger UI.
+
+    Attributes:
+        name: Name of the registered MCP tool to invoke.
+        arguments: Dictionary of arguments matching the tool's input schema.
+    """
 
     name: str
     arguments: Dict[str, Any] = {}
@@ -110,6 +115,7 @@ class FastAPIMCP(FastAPI):
     def bind(
         cls,
         app: FastAPI,
+        *,
         name: str = "FastAPIMCP",
         description: Optional[str] = None,
         auto_scan: bool = True,
@@ -321,6 +327,9 @@ class FastAPIMCP(FastAPI):
             setattr(func, "_mcp_tool_name", name)
             setattr(func, "_mcp_tool_description", doc)
             setattr(func, "_is_mcp_api_tool", True)
+            setattr(func, "mcp_tool_name", name)
+            setattr(func, "mcp_tool_description", doc)
+            setattr(func, "is_mcp_api_tool", True)
 
             self._target_app.add_api_route(
                 path=path,

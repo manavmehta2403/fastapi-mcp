@@ -61,7 +61,8 @@ def _print_tools_summary(mcp: FastAPIMCP, tools: list) -> None:
         reqs = t.input_schema.get("required", [])
         print(f"  Arguments ({len(props)}):")
         for p_name, p_info in props.items():
-            req_str = " (required)" if p_name in reqs else f" (default: {p_info.get('default')})"
+            default_val = p_info.get("default")
+            req_str = " (required)" if p_name in reqs else f" (default: {default_val})"
             desc_val = p_info.get("description")
             desc_str = f" - {desc_val}" if desc_val else ""
             print(f"    - {p_name}: {p_info.get('type')}{req_str}{desc_str}")
@@ -109,7 +110,8 @@ def main(args_list: Any = None) -> None:
             mount_sse_path=None,
         )
     else:
-        raise TypeError(f"Target object must be a FastAPI or FastAPIMCP instance, got {type(app)}")
+        msg = f"Target object must be a FastAPI or FastAPIMCP instance, got {type(app)}"
+        raise TypeError(msg)
 
     if args.command == "inspect":
         async def do_inspect():
