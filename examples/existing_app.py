@@ -127,6 +127,25 @@ async def delete_item(
     }
 
 
+# VERB: QUERY (RFC 10008: HTTP QUERY method with request body)
+@app.api_route("/items/query", methods=["QUERY"], summary="Complex inventory search (QUERY)")
+async def query_inventory(
+    filter_criteria: Dict[str, Any],
+    db: Dict[str, str] = Depends(get_db),
+) -> Dict[str, Any]:
+    """Search inventory using the HTTP QUERY method with a JSON body."""
+    matches = [
+        {"item_id": k, **v} for k, v in INVENTORY.items()
+        if not filter_criteria.get("max_price") or v["unit_price"] <= filter_criteria["max_price"]
+    ]
+    return {
+        "method": "QUERY",
+        "count": len(matches),
+        "matches": matches,
+        "db": db["status"],
+    }
+
+
 # STREAMING: Server-Sent Events (SSE) route
 async def inventory_audit_stream() -> AsyncGenerator[str, None]:
     """Stream real-time inventory scan logs."""

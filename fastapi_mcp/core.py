@@ -375,6 +375,10 @@ class FastAPIMCP(FastAPI):
 
         return decorator
 
+    def query(self, path: str, **kwargs: Any) -> Callable:
+        """Route decorator for the modern HTTP QUERY method (RFC 10008)."""
+        return self.api_route(path, methods=["QUERY"], **kwargs)
+
     def tool(
         self,
         name: Optional[str] = None,

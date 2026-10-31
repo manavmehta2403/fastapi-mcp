@@ -140,26 +140,35 @@ def main() -> None:
     )
     results.append(ok)
 
-    # 7. Dual Endpoint (REST + MCP)
+    # 7. VERB: QUERY (RFC 10008: Safe, Idempotent read with Request Body)
     ok, _ = send_http_request(
-        "7. Dual Endpoint: POST /api/translate",
+        "7. QUERY /api/items/query (HTTP QUERY Method / RFC 10008)",
+        "/api/items/query",
+        method="QUERY",
+        data={"category": "hardware", "max_price": 500.0, "tags": ["gpu"]},
+    )
+    results.append(ok)
+
+    # 8. Dual Endpoint (REST + MCP)
+    ok, _ = send_http_request(
+        "8. Dual Endpoint: POST /api/translate",
         "/api/translate",
         method="POST",
         data={"text": "All API verbs verified", "target_language": "es"},
     )
     results.append(ok)
 
-    # 8. Dual Endpoint (PATCH with Discount)
+    # 9. Dual Endpoint (PATCH with Discount)
     ok, _ = send_http_request(
-        "8. Dual Endpoint: PATCH /api/items/{item_id}/discount",
+        "9. Dual Endpoint: PATCH /api/items/{item_id}/discount",
         "/api/items/1/discount?percentage=15",
         method="PATCH",
     )
     results.append(ok)
 
-    # 9. Server-Sent Events (SSE) Stream
+    # 10. Server-Sent Events (SSE) Stream
     ok, _ = send_http_request(
-        "9. Server-Sent Events (SSE) Stream: GET /api/events/sse",
+        "10. Server-Sent Events (SSE) Stream: GET /api/events/sse",
         "/api/events/sse?events=3",
         method="GET",
         headers={"Accept": "text/event-stream"},
@@ -167,26 +176,26 @@ def main() -> None:
     )
     results.append(ok)
 
-    # 10. Chunked Token Streamable
+    # 11. Chunked Token Streamable
     ok, _ = send_http_request(
-        "10. Chunked Streamable: GET /api/stream/tokens",
+        "11. Chunked Streamable: GET /api/stream/tokens",
         "/api/stream/tokens?prompt=Verifying+Chunked+Stream",
         method="GET",
         stream=True,
     )
     results.append(ok)
 
-    # 11. Interactive MCP Swagger UI
+    # 12. Interactive MCP Swagger UI
     ok, _ = send_http_request(
-        "11. Interactive MCP Swagger Docs UI",
+        "12. Interactive MCP Swagger Docs UI",
         "/mcp/docs",
         method="GET",
     )
     results.append(ok)
 
-    # 12. FastMCP Tool Execution via UI Bridge
+    # 13. FastMCP Tool Execution via UI Bridge
     ok, _ = send_http_request(
-        "12. FastMCP Tool Execution: search_internal_knowledge",
+        "13. FastMCP Tool Execution: search_internal_knowledge",
         "/mcp/ui/call",
         method="POST",
         data={
@@ -196,9 +205,9 @@ def main() -> None:
     )
     results.append(ok)
 
-    # 13. FastMCP Native SSE Transport Endpoint
+    # 14. FastMCP Native SSE Transport Endpoint
     ok, _ = send_http_request(
-        "13. FastMCP Native SSE Transport: GET /sse/",
+        "14. FastMCP Native SSE Transport: GET /sse/",
         "/sse/",
         method="GET",
         headers={"Accept": "text/event-stream"},

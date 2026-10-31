@@ -103,7 +103,8 @@ class RouteScanner:
         self.include_paths = include_paths
         self.exclude_paths = exclude_paths or ["/docs", "/redoc", "/openapi.json"]
         self.include_methods = {
-            m.upper() for m in (include_methods or {"GET", "POST", "PUT", "DELETE", "PATCH"})
+            m.upper()
+            for m in (include_methods or {"GET", "POST", "PUT", "DELETE", "PATCH", "QUERY"})
         }
         self.headers_factory = headers_factory
         self.default_headers = default_headers

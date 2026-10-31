@@ -61,6 +61,14 @@ class ItemPatch(BaseModel):
     in_stock: Optional[bool] = Field(None, description="Optional availability flag")
 
 
+class ItemFilter(BaseModel):
+    """Payload for the HTTP QUERY method (RFC 10008)."""
+
+    category: Optional[str] = Field(None, description="Category filter")
+    max_price: Optional[float] = Field(None, gt=0, description="Max unit price")
+    tags: List[str] = Field(default_factory=list, description="Required tags")
+
+
 class TranslationRequest(BaseModel):
     """Payload for language translation."""
 
@@ -200,6 +208,34 @@ async def delete_item(
         "hard_delete": hard_delete,
         "deleted_id": item_id,
         "name": removed["name"],
+    }
+
+
+# VERB: QUERY (RFC 10008: Safe, Idempotent read with Request Body)
+@app.query(
+    "/api/items/query",
+    tags=["items"],
+    summary="Advanced Item Query (HTTP QUERY / RFC 10008)",
+)
+async def query_items(filter_query: ItemFilter) -> Dict[str, Any]:
+    """Search items using the modern HTTP QUERY method with a JSON request body."""
+    results = list(ITEMS_DB.values())
+    if filter_query.category:
+        cat = filter_query.category.lower()
+        results = [i for i in results if i["category"].lower() == cat]
+    if filter_query.max_price is not None:
+        results = [i for i in results if i["price"] <= filter_query.max_price]
+    if filter_query.tags:
+        wanted = {t.lower() for t in filter_query.tags}
+        results = [
+            i for i in results
+            if wanted.intersection({t.lower() for t in i.get("tags", [])})
+        ]
+    return {
+        "method": "QUERY",
+        "standard": "RFC 10008",
+        "match_count": len(results),
+        "items": results,
     }
 
 

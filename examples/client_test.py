@@ -60,7 +60,16 @@ async def main() -> None:
     print(res_patch.content[0].text)
 
     print("\n==================================================")
-    print("=== 6. Invoking Pure MCP Tool: search_internal_knowledge ===")
+    print("=== 6. Invoking Auto-Scanned Tool (QUERY): query_items ===")
+    print("==================================================")
+    res_query = await app.call_tool(
+        "query_items",
+        {"filter_query": {"category": "hardware", "max_price": 500.0, "tags": ["gpu"]}},
+    )
+    print(res_query.content[0].text)
+
+    print("\n==================================================")
+    print("=== 7. Invoking Pure MCP Tool: search_internal_knowledge ===")
     print("==================================================")
     res_kb = await app.call_tool(
         "search_internal_knowledge",
