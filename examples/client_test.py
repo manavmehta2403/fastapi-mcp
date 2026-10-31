@@ -1,37 +1,75 @@
 """Example: In-Memory Client Verification.
 
-Demonstrates calling tools programmatically on the hybrid application,
-simulating what Claude Desktop or an AI agent does over MCP.
+Demonstrates calling tools programmatically on the hybrid application across
+all HTTP verbs (GET, POST, PUT, PATCH, DELETE) and pure MCP tools, simulating
+what Claude Desktop, Cursor, or an autonomous AI agent does over MCP.
 """
 
 import asyncio
 from examples.hybrid_api import app
 
 
-async def main():
-    print("=== Listing Registered MCP Tools ===")
+async def main() -> None:
+    """Execute programmatic tool calls on the hybrid application."""
+    print("==================================================")
+    print("=== 1. Listing Registered FastMCP Tools ===")
+    print("==================================================")
     tools = await app.list_tools()
     for t in tools:
-        print(f"\nTool: {t.name}")
-        print(f"  Description: {t.description}")
-        print(f"  Input Schema: {list(t.input_schema.get('properties', {}).keys())}")
+        props = list(t.input_schema.get("properties", {}).keys())
+        print(f"Tool: {t.name:<30} Schema Inputs: {props}")
 
-    print("\n=== Invoking 'translate_text' Tool via MCP ===")
-    res1 = await app.call_tool(
+    print("\n==================================================")
+    print("=== 2. Invoking Dual Tool (POST): translate_text ===")
+    print("==================================================")
+    res_trans = await app.call_tool(
         "translate_text",
-        {"data": {"text": "Hello world from Model Context Protocol!", "target_language": "fr"}}
+        {"data": {"text": "FastAPI and MCP work together seamlessly", "target_language": "de"}},
     )
-    print("Translation result:")
-    print(res1.content[0].text)
+    print(res_trans.content[0].text)
 
-    print("\n=== Invoking 'search_internal_knowledge' Tool via MCP ===")
-    res2 = await app.call_tool(
-        "search_internal_knowledge",
-        {"query": "AI architecture standards", "top_k": 2}
+    print("\n==================================================")
+    print("=== 3. Invoking Auto-Scanned Tool (POST): create_item ===")
+    print("==================================================")
+    res_create = await app.call_tool(
+        "create_item",
+        {
+            "item": {
+                "name": "Quantum Neural Chip",
+                "category": "quantum",
+                "price": 1299.99,
+                "tags": ["quantum", "ai"],
+            }
+        },
     )
-    print("Knowledge search results:")
-    for c in res2.content:
+    print(res_create.content[0].text)
+
+    print("\n==================================================")
+    print("=== 4. Invoking Auto-Scanned Tool (GET): list_items (Query) ===")
+    print("==================================================")
+    res_list = await app.call_tool("list_items", {"category": "hardware", "limit": 2})
+    print(res_list.content[0].text)
+
+    print("\n==================================================")
+    print("=== 5. Invoking Auto-Scanned Tool (PATCH): patch_item ===")
+    print("==================================================")
+    res_patch = await app.call_tool(
+        "patch_item",
+        {"item_id": 1, "patch": {"price": 449.50, "in_stock": True}},
+    )
+    print(res_patch.content[0].text)
+
+    print("\n==================================================")
+    print("=== 6. Invoking Pure MCP Tool: search_internal_knowledge ===")
+    print("==================================================")
+    res_kb = await app.call_tool(
+        "search_internal_knowledge",
+        {"query": "distributed edge computing", "top_k": 2},
+    )
+    for c in res_kb.content:
         print(f" - {c.text}")
+
+    print("\n=== In-Memory MCP Client Verification Complete ===")
 
 
 if __name__ == "__main__":

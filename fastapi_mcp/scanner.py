@@ -131,6 +131,9 @@ class RouteScanner:
 
     def should_include_route(self, route: APIRoute) -> bool:
         """Determines whether an APIRoute should be converted into an MCP tool."""
+        if not getattr(route, "include_in_schema", True):
+            return False
+
         if not self._is_path_allowed(route.path):
             return False
 

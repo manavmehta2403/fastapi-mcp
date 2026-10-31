@@ -1,16 +1,34 @@
-"""Comprehensive verification script for FastAPI + MCP Unified Server."""
+"""Comprehensive Verification Suite for Hybrid FastAPI + FastMCP.
+
+Tests all HTTP Verbs (GET, POST, PUT, PATCH, DELETE), Query and Path Parameters,
+Server-Sent Events (SSE) streaming, Chunked token streaming, MCP Tool Calls,
+and Native FastMCP transports.
+"""
 
 import json
-import urllib.request
 import sys
+import urllib.parse
+import urllib.request
+from typing import Any, Dict, Optional, Tuple
 
 BASE_URL = "http://127.0.0.1:8000"
 
-def test_endpoint(name: str, url: str, method: str = "GET", data: dict = None, headers: dict = None):
-    print(f"\n=======================================================")
+
+def send_http_request(
+    name: str,
+    path: str,
+    method: str = "GET",
+    data: Optional[Dict[str, Any]] = None,
+    headers: Optional[Dict[str, str]] = None,
+    stream: bool = False,
+) -> Tuple[bool, Optional[Any]]:
+    """Send an HTTP request and report the test outcome."""
+    url = f"{BASE_URL}{path}"
+    print("\n=======================================================")
     print(f"Testing: {name}")
     print(f"{method} {url}")
-    req_headers = {"User-Agent": "FastAPIMCPVerifier/1.0"}
+
+    req_headers = {"User-Agent": "FastAPIMCPFullVerifier/1.0"}
     if headers:
         req_headers.update(headers)
 
@@ -26,61 +44,177 @@ def test_endpoint(name: str, url: str, method: str = "GET", data: dict = None, h
         with urllib.request.urlopen(req, data=body, timeout=5) as resp:
             status = resp.status
             content_type = resp.headers.get("content-type", "")
+
+            if stream:
+                print(f"[OK] Status {status} ({content_type}) - Stream Started")
+                chunks = []
+                for _ in range(2):
+                    line = resp.readline().decode("utf-8", errors="ignore")
+                    if not line:
+                        break
+                    chunks.append(line.strip())
+                print(f"Stream sample received ({len(chunks)} lines):")
+                for c in chunks:
+                    if c:
+                        print(f"  > {c}")
+                return True, chunks
+
             content = resp.read()
             try:
                 parsed = json.loads(content.decode("utf-8"))
                 print(f"[OK] Status {status} ({content_type}):\n{json.dumps(parsed, indent=2)}")
-                return True
-            except Exception:
+                return True, parsed
+            except Exception:  # pylint: disable=broad-exception-caught
                 print(f"[OK] Status {status} ({content_type}): {len(content)} bytes")
-                preview = content[:140].decode("utf-8", errors="ignore").replace("\n", " ")
+                preview = content[:150].decode("utf-8", errors="ignore").replace("\n", " ")
                 print(f"Preview: {preview}...")
-                return True
-    except Exception as e:
+                return True, content
+    except Exception as e:  # pylint: disable=broad-exception-caught
         print(f"[FAIL] Error: {e}")
-        return False
+        return False, None
 
-def main():
+
+def main() -> None:
+    """Execute all verification tests across all verbs and streaming endpoints."""
     results = []
 
-    # 1. Standard Health Check (Pure REST)
-    results.append(test_endpoint("1. FastAPI REST Health Check", f"{BASE_URL}/health"))
+    # 1. VERB: GET with Query Parameters
+    ok, _ = send_http_request(
+        "1. GET /api/items (with Query parameters)",
+        "/api/items?category=hardware&limit=2",
+        method="GET",
+    )
+    results.append(ok)
 
-    # 2. Dual REST Route
-    results.append(test_endpoint("2. FastAPI Dual REST Translate", f"{BASE_URL}/api/translate", method="POST", data={"text": "Hello world from REST client", "target_language": "es"}))
+    # 2. VERB: GET with Path Parameter
+    ok, _ = send_http_request(
+        "2. GET /api/items/{item_id} (with Path parameter)",
+        "/api/items/1",
+        method="GET",
+    )
+    results.append(ok)
 
-    # 3. OpenAPI Docs (REST)
-    results.append(test_endpoint("3. FastAPI Swagger UI Docs", f"{BASE_URL}/docs"))
+    # 3. VERB: POST with Request Body
+    ok, created = send_http_request(
+        "3. POST /api/items (Create with Body)",
+        "/api/items",
+        method="POST",
+        data={
+            "name": "Superconducting QPU",
+            "category": "quantum",
+            "price": 4999.00,
+            "tags": ["quantum", "qpu"],
+        },
+    )
+    results.append(ok)
+    created_id = created.get("item", {}).get("id") if (created and isinstance(created, dict)) else 4
 
-    # 4. MCP UI Docs (HTML Interface)
-    results.append(test_endpoint("4. MCP Interactive Swagger Docs UI", f"{BASE_URL}/mcp/docs"))
+    # 4. VERB: PUT with Path and Full Body
+    ok, _ = send_http_request(
+        "4. PUT /api/items/{item_id} (Full Update)",
+        "/api/items/2",
+        method="PUT",
+        data={
+            "name": "Smart Edge Sensor v2",
+            "category": "iot",
+            "price": 105.00,
+            "in_stock": True,
+        },
+    )
+    results.append(ok)
 
-    # 5. MCP Tool Call - Dual Tool
-    results.append(test_endpoint("5. MCP Tool Invocation (translate_text)", f"{BASE_URL}/mcp/ui/call", method="POST", data={"name": "translate_text", "arguments": {"data": {"text": "Hello from MCP Agent", "target_language": "fr"}}}))
+    # 5. VERB: PATCH with Path and Partial Body
+    ok, _ = send_http_request(
+        "5. PATCH /api/items/{item_id} (Partial Update)",
+        "/api/items/2",
+        method="PATCH",
+        data={"price": 99.99},
+    )
+    results.append(ok)
 
-    # 6. MCP Tool Call - Pure MCP Tool
-    results.append(test_endpoint("6. MCP Pure Tool Invocation (search_internal_knowledge)", f"{BASE_URL}/mcp/ui/call", method="POST", data={"name": "search_internal_knowledge", "arguments": {"query": "production readiness", "top_k": 2}}))
+    # 6. VERB: DELETE with Path and Query Parameter (deletes the newly created item)
+    ok, _ = send_http_request(
+        f"6. DELETE /api/items/{{item_id}} (Path + Query Param - Deleting ID {created_id})",
+        f"/api/items/{created_id}?hard_delete=true",
+        method="DELETE",
+    )
+    results.append(ok)
 
-    # 7. MCP SSE Streaming Endpoint
-    print(f"\n=======================================================")
-    print(f"Testing: 7. MCP SSE Event-Stream Endpoint")
-    print(f"GET {BASE_URL}/sse/")
-    try:
-        req = urllib.request.Request(f"{BASE_URL}/sse/", headers={"Accept": "text/event-stream"})
-        with urllib.request.urlopen(req, timeout=3) as resp:
-            print(f"[OK] Status {resp.status}, Content-Type: {resp.headers.get('content-type')}")
-            first_line = resp.readline().decode("utf-8", errors="ignore").strip()
-            print(f"SSE First line received: '{first_line}'")
-            results.append(True)
-    except Exception as e:
-        print(f"[INFO] SSE result: {e}")
-        results.append(True)
+    # 7. Dual Endpoint (REST + MCP)
+    ok, _ = send_http_request(
+        "7. Dual Endpoint: POST /api/translate",
+        "/api/translate",
+        method="POST",
+        data={"text": "All API verbs verified", "target_language": "es"},
+    )
+    results.append(ok)
 
-    print("\n=======================================================")
-    print(f"VERIFICATION RESULTS: {sum(results)}/{len(results)} Checks Passed.")
-    print("=======================================================\n")
+    # 8. Dual Endpoint (PATCH with Discount)
+    ok, _ = send_http_request(
+        "8. Dual Endpoint: PATCH /api/items/{item_id}/discount",
+        "/api/items/1/discount?percentage=15",
+        method="PATCH",
+    )
+    results.append(ok)
+
+    # 9. Server-Sent Events (SSE) Stream
+    ok, _ = send_http_request(
+        "9. Server-Sent Events (SSE) Stream: GET /api/events/sse",
+        "/api/events/sse?events=3",
+        method="GET",
+        headers={"Accept": "text/event-stream"},
+        stream=True,
+    )
+    results.append(ok)
+
+    # 10. Chunked Token Streamable
+    ok, _ = send_http_request(
+        "10. Chunked Streamable: GET /api/stream/tokens",
+        "/api/stream/tokens?prompt=Verifying+Chunked+Stream",
+        method="GET",
+        stream=True,
+    )
+    results.append(ok)
+
+    # 11. Interactive MCP Swagger UI
+    ok, _ = send_http_request(
+        "11. Interactive MCP Swagger Docs UI",
+        "/mcp/docs",
+        method="GET",
+    )
+    results.append(ok)
+
+    # 12. FastMCP Tool Execution via UI Bridge
+    ok, _ = send_http_request(
+        "12. FastMCP Tool Execution: search_internal_knowledge",
+        "/mcp/ui/call",
+        method="POST",
+        data={
+            "name": "search_internal_knowledge",
+            "arguments": {"query": "production stability", "top_k": 2},
+        },
+    )
+    results.append(ok)
+
+    # 13. FastMCP Native SSE Transport Endpoint
+    ok, _ = send_http_request(
+        "13. FastMCP Native SSE Transport: GET /sse/",
+        "/sse/",
+        method="GET",
+        headers={"Accept": "text/event-stream"},
+        stream=True,
+    )
+    results.append(ok)
+
+    passed_count = sum(results)
+    total_count = len(results)
+    print("\n" + "=" * 65)
+    print(f"VERIFICATION SUMMARY: {passed_count}/{total_count} CHECKS PASSED")
+    print("=" * 65 + "\n")
+
     if not all(results):
         sys.exit(1)
+
 
 if __name__ == "__main__":
     main()
