@@ -259,6 +259,51 @@ Add this to your `claude_desktop_config.json`:
 
 ---
 
+## 🛡️ Enterprise Hardening: Solving Production Bottlenecks
+
+In large enterprise microservices with dozens or hundreds of routes, simply dumping every endpoint as an individual MCP tool creates serious production hurdles. `fastapi-mcp` ships with built-in primitives to solve them:
+
+### 1. Librarian Discovery Pattern (Preventing Context Window Bloat)
+Exposing 80+ tools dumps 15,000–25,000 tokens into the LLM system prompt on every single turn, degrading reasoning and exploding API bills. 
+
+Activate **Librarian Mode** to condense all catalog tools into **3 lightweight meta-tools**:
+```python
+mcp = FastAPIMCP.bind(app, librarian=True)
+```
+The LLM now only sees:
+* `list_api_categories()`: Browse high-level domains (e.g. `billing`, `inventory`, `users`) with tool summaries.
+* `search_api_tools(query, category)`: Fetch detailed schemas for matching tools on demand.
+* `execute_api_tool(tool_name, arguments)`: Dynamically invoke the requested underlying endpoint.
+
+### 2. Dry-Run Simulation Mode (`enable_dry_run=True`)
+Allow AI agents to validate parameters and simulate state mutations (`POST`, `PUT`, `DELETE`, `PATCH`) safely:
+```python
+mcp = FastAPIMCP.bind(app, enable_dry_run=True)
+```
+* Injects a `dry_run: bool = False` argument into mutation tools.
+* Dispatches in-memory with `X-Dry-Run: true` header and `?dry_run=true` query parameter.
+* Wraps responses with `{"dry_run": True, "simulated": True, "result": ...}` so agents can test changes before committing them.
+
+### 3. Dynamic Session Context Provider (Multi-Tenant Stdio & SSE Auth)
+Desktop agents connecting via `stdio` (like Claude Desktop or Cursor) do not send standard HTTP `Authorization: Bearer <token>` headers. Without caller context, endpoints with `Depends(get_current_user)` fail with 401 Unauthorized.
+
+Inject authentication claims dynamically per session:
+```python
+def resolve_tenant_context(tool_args: dict) -> dict:
+    # Resolve active tenant / user from session or environment
+    return {"Authorization": "Bearer session-token-xyz", "X-Tenant-ID": "acme-corp"}
+
+mcp = FastAPIMCP.bind(
+    app,
+    session_context_provider=resolve_tenant_context,
+)
+
+# Or update dynamically during runtime
+mcp.set_session_context_provider(lambda kwargs: {"Authorization": "Bearer rotated-token"})
+```
+
+---
+
 ## 🛠️ CLI Utilities
 
 ### 1. Inspect Tools and Schemas

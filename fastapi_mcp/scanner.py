@@ -30,6 +30,8 @@ class RouteScanner:
         include_methods: Optional[Set[str]] = None,
         headers_factory: Optional[Callable[[], Dict[str, str]]] = None,
         default_headers: Optional[Dict[str, str]] = None,
+        session_context_provider: Optional[Callable[[Dict[str, Any]], Dict[str, str]]] = None,
+        enable_dry_run: bool = False,
         tool_name_prefix: str = "",
     ):
         self.app = app
@@ -42,6 +44,8 @@ class RouteScanner:
         }
         self.headers_factory = headers_factory
         self.default_headers = default_headers
+        self.session_context_provider = session_context_provider
+        self.enable_dry_run = enable_dry_run
         self.tool_name_prefix = tool_name_prefix
 
     def should_include_route(self, route: APIRoute) -> bool:
@@ -126,6 +130,13 @@ class RouteScanner:
             param_default = inspect.Parameter.empty if is_req else default
             raw_params.append((p.name, ann, param_default, is_req))
 
+        # 4. Optional Dry-Run parameter for state-modifying actions
+        is_state_modifying = method in {"POST", "PUT", "DELETE", "PATCH"}
+        if self.enable_dry_run and is_state_modifying:
+            dry_ann = Annotated[bool, Field(description="[Dry Run] If true, validates input and simulates action without writing changes")]
+            annotations["dry_run"] = dry_ann
+            raw_params.append(("dry_run", dry_ann, False, False))
+
         # Sort: required parameters first (is_req == True), then optional
         sorted_params = sorted(raw_params, key=lambda x: not x[3])
 
@@ -174,6 +185,8 @@ class RouteScanner:
             is_single_body_param=is_single_body_param,
             headers_factory=self.headers_factory,
             default_headers=self.default_headers,
+            session_context_provider=self.session_context_provider,
+            enable_dry_run=self.enable_dry_run,
         )
 
         async def tool_runner(**kwargs: Any) -> Any:
@@ -183,6 +196,9 @@ class RouteScanner:
         tool_runner.__doc__ = tool_doc
         tool_runner.__signature__ = sig
         tool_runner.__annotations__ = annotations
+        tool_runner._mcp_tags = list(route.tags or [])
+        tool_runner._mcp_path = path_template
+        tool_runner._mcp_method = method
 
         return tool_name, tool_doc, tool_runner
 

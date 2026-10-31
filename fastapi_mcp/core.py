@@ -9,6 +9,7 @@ from typing import (
     Optional,
     Sequence,
     Set,
+    Tuple,
     Type,
     Union,
 )
@@ -43,6 +44,9 @@ class FastAPIMCP(FastAPI):
         include_methods: Optional[Set[str]] = None,
         headers_factory: Optional[Callable[[], Dict[str, str]]] = None,
         default_headers: Optional[Dict[str, str]] = None,
+        session_context_provider: Optional[Callable[..., Dict[str, str]]] = None,
+        enable_dry_run: bool = False,
+        librarian: bool = False,
         tool_name_prefix: str = "",
         existing_app: Optional[FastAPI] = None,
         lifespan: Optional[Callable[[Any], Any]] = None,
@@ -54,6 +58,13 @@ class FastAPIMCP(FastAPI):
         self.auto_scan = auto_scan
         self._scanned = False
         self._registered_tool_names: Set[str] = set()
+        self.librarian = librarian
+        self.session_context_provider = session_context_provider
+        self.enable_dry_run = enable_dry_run
+        self._tool_catalog: Dict[str, Tuple[str, str, Callable]] = {}
+
+        if session_context_provider:
+            setattr(self._target_app, "_mcp_session_context_provider", session_context_provider)
 
         self.scanner = RouteScanner(
             app=self._target_app,
@@ -64,6 +75,8 @@ class FastAPIMCP(FastAPI):
             include_methods=include_methods,
             headers_factory=headers_factory,
             default_headers=default_headers,
+            session_context_provider=session_context_provider,
+            enable_dry_run=enable_dry_run,
             tool_name_prefix=tool_name_prefix,
         )
 
@@ -97,6 +110,9 @@ class FastAPIMCP(FastAPI):
         auto_scan: bool = True,
         mount_path: Optional[str] = "/mcp",
         mount_sse_path: Optional[str] = "/sse",
+        librarian: bool = False,
+        session_context_provider: Optional[Callable[..., Dict[str, str]]] = None,
+        enable_dry_run: bool = False,
         **kwargs: Any,
     ) -> "FastAPIMCP":
         """Factory method to bind FastMCP to an existing FastAPI instance in one line."""
@@ -105,21 +121,160 @@ class FastAPIMCP(FastAPI):
             mcp_description=description,
             existing_app=app,
             auto_scan=auto_scan,
+            librarian=librarian,
+            session_context_provider=session_context_provider,
+            enable_dry_run=enable_dry_run,
             **kwargs,
         )
         if mount_path or mount_sse_path:
             instance.mount_to(app, path=mount_path, sse_path=mount_sse_path)
         return instance
 
+    def set_session_context_provider(self, provider: Callable[..., Dict[str, str]]) -> None:
+        """Sets or updates the dynamic session context provider callback."""
+        self.session_context_provider = provider
+        self.scanner.session_context_provider = provider
+        setattr(self._target_app, "_mcp_session_context_provider", provider)
+
+    def get_tool_catalog(self) -> Dict[str, Tuple[str, str, Callable]]:
+        """Returns the dictionary of all discovered API tools in the catalog."""
+        if not self._scanned and self.auto_scan:
+            self.scan_routes()
+        return self._tool_catalog
+
+    def _register_librarian_meta_tools(self) -> None:
+        """Registers the 3 Librarian meta-tools to prevent LLM context-window bloat."""
+        if "_librarian_registered" in self._registered_tool_names:
+            return
+
+        async def list_api_categories() -> Dict[str, Any]:
+            """List available API tool categories (OpenAPI tags) with tool counts and summaries to prevent context bloat."""
+            categories: Dict[str, List[Dict[str, str]]] = {}
+            for name, (t_name, t_doc, runner) in self._tool_catalog.items():
+                tags = getattr(runner, "_mcp_tags", []) or ["default"]
+                summary = (t_doc.split("\n")[0] if t_doc else "").strip()
+                for tag in tags:
+                    if tag not in categories:
+                        categories[tag] = []
+                    categories[tag].append({"name": name, "summary": summary})
+
+            result = [
+                {"category": cat, "tool_count": len(t_list), "tools": t_list}
+                for cat, t_list in sorted(categories.items())
+            ]
+            return {
+                "categories": result,
+                "total_tools": len(self._tool_catalog),
+                "hint": "Use 'search_api_tools(query, category)' to inspect parameter schemas before calling 'execute_api_tool'.",
+            }
+
+        async def search_api_tools(query: Optional[str] = None, category: Optional[str] = None) -> Dict[str, Any]:
+            """Search registered API tools by name, description, tags, or endpoint path. Returns schema and parameters."""
+            matches = []
+            q = (query or "").lower().strip()
+            cat_filter = (category or "").lower().strip()
+
+            for name, (t_name, t_doc, runner) in self._tool_catalog.items():
+                tags = [t.lower() for t in getattr(runner, "_mcp_tags", []) or ["default"]]
+                path = getattr(runner, "_mcp_path", "")
+                method = getattr(runner, "_mcp_method", "")
+
+                if cat_filter and not any(cat_filter in t for t in tags):
+                    continue
+
+                if q:
+                    match_name = q in name.lower()
+                    match_doc = q in (t_doc or "").lower()
+                    match_path = q in path.lower()
+                    match_tag = any(q in t for t in tags)
+                    if not (match_name or match_doc or match_path or match_tag):
+                        continue
+
+                sig = getattr(runner, "__signature__", None)
+                params_info = {}
+                if sig:
+                    for p_name, p in sig.parameters.items():
+                        p_type = getattr(p.annotation, "__name__", str(p.annotation)) if p.annotation != inspect.Parameter.empty else "Any"
+                        params_info[p_name] = {
+                            "type": str(p_type),
+                            "required": p.default == inspect.Parameter.empty,
+                            "default": None if p.default == inspect.Parameter.empty else (
+                                str(p.default) if not isinstance(p.default, (int, float, bool, str, list, dict, type(None))) else p.default
+                            ),
+                        }
+
+                matches.append({
+                    "name": name,
+                    "method": method,
+                    "path": path,
+                    "category": tags[0] if tags else "default",
+                    "description": t_doc,
+                    "parameters": params_info,
+                })
+
+            return {
+                "tools": matches,
+                "count": len(matches),
+                "hint": "Call 'execute_api_tool(tool_name, arguments)' with the required parameters.",
+            }
+
+        async def execute_api_tool(tool_name: str, arguments: Optional[Dict[str, Any]] = None) -> Any:
+            """Execute an API tool discovered via search_api_tools by its name with the specified arguments."""
+            args = arguments or {}
+            if tool_name not in self._tool_catalog:
+                return {
+                    "is_error": True,
+                    "error": f"Tool '{tool_name}' not found in catalog.",
+                    "available_tools": list(self._tool_catalog.keys())[:10],
+                    "hint": "Call list_api_categories() or search_api_tools(query) to find valid tool names.",
+                }
+
+            _, _, runner = self._tool_catalog[tool_name]
+            try:
+                if inspect.iscoroutinefunction(runner):
+                    return await runner(**args)
+                return runner(**args)
+            except Exception as e:
+                return {
+                    "is_error": True,
+                    "tool_name": tool_name,
+                    "error": str(e),
+                }
+
+        self.mcp_server.add_tool(
+            list_api_categories,
+            name="list_api_categories",
+            description="List available API tool categories (tags) with tool counts and summaries to prevent context bloat.",
+        )
+        self.mcp_server.add_tool(
+            search_api_tools,
+            name="search_api_tools",
+            description="Search registered API tools by name, description, tags, or endpoint path. Returns schema and parameters.",
+        )
+        self.mcp_server.add_tool(
+            execute_api_tool,
+            name="execute_api_tool",
+            description="Execute an API tool discovered via search_api_tools by its name with the specified arguments.",
+        )
+        self._registered_tool_names.add("_librarian_registered")
+
     def scan_routes(self) -> List[str]:
         """Scans the FastAPI app routes and registers matching routes as MCP tools."""
         tools = self.scanner.scan()
         added_names = []
         for name, doc, runner in tools:
-            if name not in self._registered_tool_names:
-                self.mcp_server.add_tool(runner, name=name, description=doc)
-                self._registered_tool_names.add(name)
+            self._tool_catalog[name] = (name, doc, runner)
+            if not self.librarian:
+                if name not in self._registered_tool_names:
+                    self.mcp_server.add_tool(runner, name=name, description=doc)
+                    self._registered_tool_names.add(name)
+                    added_names.append(name)
+            else:
                 added_names.append(name)
+
+        if self.librarian:
+            self._register_librarian_meta_tools()
+
         self._scanned = True
         return added_names
 
@@ -153,18 +308,24 @@ class FastAPIMCP(FastAPI):
             )
 
             # 2. Register tool with scanner immediately
-            if name not in self._registered_tool_names:
-                route_matches = [
-                    r for r in self._target_app.routes
-                    if isinstance(r, APIRoute) and r.endpoint == func and r.path == path
-                ]
-                if route_matches:
-                    _, _, runner = self.scanner.convert_route(route_matches[-1])
+            route_matches = [
+                r for r in self._target_app.routes
+                if isinstance(r, APIRoute) and r.endpoint == func and r.path == path
+            ]
+            if route_matches:
+                t_name, t_doc, runner = self.scanner.convert_route(route_matches[-1])
+            else:
+                t_name, t_doc, runner = name, doc, func
+
+            self._tool_catalog[name] = (t_name, t_doc, runner)
+
+            if not self.librarian:
+                if name not in self._registered_tool_names:
                     self.mcp_server.add_tool(runner, name=name, description=doc)
                     self._registered_tool_names.add(name)
-                else:
-                    self.mcp_server.add_tool(func, name=name, description=doc)
-                    self._registered_tool_names.add(name)
+            else:
+                if self._scanned:
+                    self._register_librarian_meta_tools()
 
             return func
 
@@ -179,9 +340,14 @@ class FastAPIMCP(FastAPI):
         """Decorator for pure MCP tools (like FastMCP's @mcp.tool()). Not exposed via REST."""
         def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
             t_name = sanitize_tool_name(name or func.__name__)
-            t_doc = description or func.__doc__
-            self.mcp_server.add_tool(func, name=t_name, description=t_doc, **kwargs)
-            self._registered_tool_names.add(t_name)
+            t_doc = description or func.__doc__ or ""
+            self._tool_catalog[t_name] = (t_name, t_doc, func)
+            if not self.librarian:
+                self.mcp_server.add_tool(func, name=t_name, description=t_doc, **kwargs)
+                self._registered_tool_names.add(t_name)
+            else:
+                if self._scanned:
+                    self._register_librarian_meta_tools()
             return func
 
         return decorator
@@ -217,8 +383,9 @@ class FastAPIMCP(FastAPI):
         @target_app.get(ui_path, response_class=HTMLResponse, include_in_schema=False)
         async def mcp_swagger_docs():
             tools = await self.list_tools()
+            title = self.mcp_name + (" [Librarian Active: 3 Meta-Tools]" if self.librarian else "")
             html = get_mcp_swagger_html(
-                title=self.mcp_name,
+                title=title,
                 tools=tools,
                 mcp_path=mcp_path,
                 sse_path=sse_path,
@@ -284,7 +451,13 @@ class FastAPIMCP(FastAPI):
         """Call a registered tool programmatically."""
         if not self._scanned and self.auto_scan:
             self.scan_routes()
-        return await self.mcp_server.call_tool(name, arguments or {})
+        args = arguments or {}
+        if self.librarian and name in self._tool_catalog:
+            _, _, runner = self._tool_catalog[name]
+            if inspect.iscoroutinefunction(runner):
+                return await runner(**args)
+            return runner(**args)
+        return await self.mcp_server.call_tool(name, args)
 
     def run_stdio(self) -> None:
         """Run the MCP server over standard input/output (stdio).

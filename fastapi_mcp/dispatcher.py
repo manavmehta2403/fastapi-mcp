@@ -19,6 +19,8 @@ class ASGIDispatcher:
         is_single_body_param: bool = True,
         headers_factory: Optional[Callable[[], Dict[str, str]]] = None,
         default_headers: Optional[Dict[str, str]] = None,
+        session_context_provider: Optional[Callable[[Dict[str, Any]], Dict[str, str]]] = None,
+        enable_dry_run: bool = False,
     ):
         self.app = app
         self.method = method.upper()
@@ -29,6 +31,8 @@ class ASGIDispatcher:
         self.is_single_body_param = is_single_body_param
         self.headers_factory = headers_factory
         self.default_headers = default_headers or {}
+        self.session_context_provider = session_context_provider
+        self.enable_dry_run = enable_dry_run
 
     def _serialize_val(self, val: Any) -> Any:
         if hasattr(val, "model_dump"):
@@ -38,6 +42,9 @@ class ASGIDispatcher:
         return val
 
     async def __call__(self, **kwargs: Any) -> Any:
+        # Check dry_run flag
+        is_dry_run = bool(kwargs.pop("dry_run", False))
+
         # 1. Format URL path
         url_path = self.path_template
         for pname in self.path_param_names:
@@ -52,6 +59,9 @@ class ASGIDispatcher:
             if qname in kwargs and kwargs[qname] is not None:
                 params[qname] = self._serialize_val(kwargs[qname])
 
+        if is_dry_run:
+            params["dry_run"] = "true"
+
         # 3. Collect body params
         json_body = None
         if self.is_single_body_param and self.body_param_names:
@@ -64,12 +74,26 @@ class ASGIDispatcher:
                 if bname in kwargs and kwargs[bname] is not None:
                     json_body[bname] = self._serialize_val(kwargs[bname])
 
-        # 4. Resolve headers
+        # 4. Resolve headers with dynamic session context
         headers = dict(self.default_headers)
         if self.headers_factory:
             dynamic_headers = self.headers_factory()
             if dynamic_headers:
                 headers.update(dynamic_headers)
+
+        provider = getattr(self.app, "_mcp_session_context_provider", None) or self.session_context_provider
+        if provider:
+            import inspect
+            sig = inspect.signature(provider)
+            if len(sig.parameters) == 0:
+                session_headers = provider()
+            else:
+                session_headers = provider(kwargs)
+            if session_headers:
+                headers.update(session_headers)
+
+        if is_dry_run:
+            headers["X-Dry-Run"] = "true"
 
         # 5. Dispatch in-memory via ASGI transport
         transport = httpx.ASGITransport(app=self.app)
@@ -82,9 +106,14 @@ class ASGIDispatcher:
                 headers=headers if headers else None,
             )
 
-            try:
-                data = resp.json()
-            except Exception:
+            # Robust response parsing (handles JSON, streaming text, or binary fallbacks)
+            content_type = resp.headers.get("content-type", "")
+            if "application/json" in content_type:
+                try:
+                    data = resp.json()
+                except Exception:
+                    data = resp.text
+            else:
                 data = resp.text
 
             if resp.status_code >= 400:
@@ -92,6 +121,13 @@ class ASGIDispatcher:
                     "is_error": True,
                     "status_code": resp.status_code,
                     "detail": data,
+                }
+
+            if is_dry_run:
+                return {
+                    "dry_run": True,
+                    "simulated": True,
+                    "result": data,
                 }
 
             return data
