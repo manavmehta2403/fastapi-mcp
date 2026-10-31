@@ -539,3 +539,27 @@ def test_lifespan_and_mounting_fallbacks(monkeypatch):
     target = FastAPI()
     app_fallback.mount_to(target, path="/mcp-tgt", sse_path="/sse-tgt", enable_ui=False)
 
+
+@pytest.mark.asyncio
+async def test_version_and_http_query_decorator():
+    """Test __version__ and @app.query decorator for RFC 10008 HTTP QUERY method."""
+    import fastapi_mcp
+
+    assert fastapi_mcp.__version__ == "0.1.1"
+
+    app = FastAPIMCP(auto_scan=True)
+
+    class QueryModel(BaseModel):
+        filter_text: str
+
+    @app.query("/search-rfc")
+    def rfc_search(q: QueryModel):
+        return {"found": q.filter_text}
+
+    tools = await app.list_tools()
+    assert "rfc_search" in [t.name for t in tools]
+
+    res = await app.call_tool("rfc_search", {"q": {"filter_text": "testing rfc 10008"}})
+    assert "testing rfc 10008" in str(res)
+
+
