@@ -5,6 +5,7 @@ and `/mcp/ui` (100% Offline Standalone Explorer) where developers can inspect
 registered tools, view schemas, fill in parameters, and execute tools live in the browser.
 """
 
+import copy
 import json
 from typing import Any, Dict, List, Optional, Tuple
 from fastapi.openapi.docs import get_swagger_ui_html
@@ -534,6 +535,24 @@ def _extract_tool_schema_and_meta(tool: Any) -> Tuple[str, str, Dict[str, Any]]:
     return name, doc, schema_dict
 
 
+def _inline_defs(schema: Any, defs: Dict[str, Any]) -> Any:
+    """Recursively resolves and inlines $ref pointers from $defs to eliminate resolver errors."""
+    if isinstance(schema, dict):
+        if "$ref" in schema and isinstance(schema["$ref"], str):
+            ref = schema["$ref"]
+            def_name = ref.split("/")[-1]
+            if def_name in defs:
+                resolved = _inline_defs(copy.deepcopy(defs[def_name]), defs)
+                for k, v in schema.items():
+                    if k != "$ref" and k not in resolved:
+                        resolved[k] = v
+                return resolved
+        return {k: _inline_defs(v, defs) for k, v in schema.items() if k != "$defs"}
+    if isinstance(schema, list):
+        return [_inline_defs(item, defs) for item in schema]
+    return schema
+
+
 def _build_tool_example(props: Dict[str, Any]) -> Dict[str, Any]:
     """Builds example arguments dictionary from property schema definitions."""
     example_body: Dict[str, Any] = {}
@@ -550,7 +569,11 @@ def _build_tool_example(props: Dict[str, Any]) -> Dict[str, Any]:
         elif p_type == "array":
             example_body[prop_name] = []
         elif p_type == "object":
-            example_body[prop_name] = {}
+            nested_props = prop_val.get("properties")
+            if nested_props and isinstance(nested_props, dict):
+                example_body[prop_name] = _build_tool_example(nested_props)
+            else:
+                example_body[prop_name] = {}
         else:
             example_body[prop_name] = "string"
     return example_body
@@ -577,9 +600,15 @@ def generate_mcp_openapi_spec(
     """
     catalog = catalog or {}
     paths: Dict[str, Any] = {}
+    global_defs: Dict[str, Any] = {}
 
     for tool in tools:
-        name, doc, schema_dict = _extract_tool_schema_and_meta(tool)
+        name, doc, raw_schema = _extract_tool_schema_and_meta(tool)
+        tool_defs = raw_schema.get("$defs", {})
+        if isinstance(tool_defs, dict):
+            global_defs.update(tool_defs)
+
+        schema_dict = _inline_defs(raw_schema, {**global_defs, **tool_defs})
         tool_endpoint = f"{mcp_path.rstrip('/')}/tools/{name}"
 
         # Extract tags from catalog if available
@@ -658,6 +687,8 @@ def generate_mcp_openapi_spec(
             ),
         },
         "paths": paths,
+        "components": {"schemas": global_defs},
+        "$defs": global_defs,
     }
 
 
@@ -720,9 +751,21 @@ def get_official_swagger_ui_html(
 def _serialize_tool_for_ui(tool: Any) -> Dict[str, Any]:
     """Helper to convert any Tool object or dict into a JSON-serializable dictionary."""
     if hasattr(tool, "model_dump"):
-        return tool.model_dump()
+        dumped = tool.model_dump()
+        raw_in = dumped.get("input_schema")
+        if isinstance(raw_in, dict):
+            defs = raw_in.get("$defs", {})
+            if isinstance(defs, dict) and defs:
+                dumped["input_schema"] = _inline_defs(raw_in, defs)
+        return dumped
     if isinstance(tool, dict):
-        return tool
+        tool_copy = copy.deepcopy(tool)
+        raw_in = tool_copy.get("input_schema") or tool_copy.get("inputSchema")
+        if isinstance(raw_in, dict):
+            defs = raw_in.get("$defs", {})
+            if isinstance(defs, dict) and defs:
+                tool_copy["input_schema"] = _inline_defs(raw_in, defs)
+        return tool_copy
     raw_schema = (
         getattr(tool, "input_schema", None)
         or getattr(tool, "inputSchema", None)
@@ -733,6 +776,9 @@ def _serialize_tool_for_ui(tool: Any) -> Dict[str, Any]:
         schema_dict = raw_schema
     else:
         schema_dict = {"type": "object", "properties": {}}
+    defs = schema_dict.get("$defs", {})
+    if isinstance(defs, dict) and defs:
+        schema_dict = _inline_defs(schema_dict, defs)
     return {
         "name": getattr(tool, "name", "tool"),
         "description": getattr(tool, "description", ""),
