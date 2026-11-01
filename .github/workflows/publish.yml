@@ -1,6 +1,8 @@
 name: Publish to PyPI 📦
 
 on:
+  push:
+    branches: [main]
   release:
     types: [published]
   workflow_dispatch:
@@ -13,14 +15,81 @@ on:
         options:
           - pypi
           - testpypi
+      force_publish:
+        description: "Force publish even if version matches"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+  id-token: write
 
 jobs:
-  build:
-    name: Build source distribution and wheel
+  check-version:
+    name: Check Version & Sync
+    runs-on: ubuntu-latest
+    outputs:
+      should_publish: ${{ steps.compare.outputs.should_publish }}
+      local_version: ${{ steps.compare.outputs.local_version }}
+      pypi_version: ${{ steps.compare.outputs.pypi_version }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Compare PyPI and Local Version
+        id: compare
+        run: |
+          python -c "
+          import urllib.request, json, tomllib, os
+
+          # Read local version
+          with open('pyproject.toml', 'rb') as f:
+              local_ver = tomllib.load(f)['project']['version']
+
+          # Fetch PyPI version
+          pypi_ver = '0.0.0'
+          try:
+              req = urllib.request.Request(
+                  'https://pypi.org/pypi/fastapi-fastmcp/json',
+                  headers={'User-Agent': 'GitHub-Actions-CI'}
+              )
+              with urllib.request.urlopen(req, timeout=10) as resp:
+                  data = json.loads(resp.read().decode())
+                  pypi_ver = data['info']['version']
+          except Exception as e:
+              print(f'PyPI query note: {e}')
+
+          print(f'Local version: {local_ver}')
+          print(f'PyPI version:  {pypi_ver}')
+
+          force = '${{ github.event.inputs.force_publish }}' == 'true'
+          is_release = '${{ github.event_name }}' == 'release'
+          should_pub = force or is_release or (local_ver != pypi_ver)
+
+          github_output = os.environ.get('GITHUB_OUTPUT', '')
+          if github_output:
+              with open(github_output, 'a') as gh_out:
+                  gh_out.write(f'local_version={local_ver}\n')
+                  gh_out.write(f'pypi_version={pypi_ver}\n')
+                  gh_out.write(f'should_publish={\"true\" if should_pub else \"false\"}\n')
+          "
+
+  build-and-publish:
+    name: Build & Publish to PyPI
+    needs: [check-version]
+    if: needs.check-version.outputs.should_publish == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -39,29 +108,25 @@ jobs:
         run: |
           twine check dist/*
 
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: python-package-distributions
-          path: dist/
-
-  publish-to-pypi:
-    name: Publish to PyPI
-    needs: [build]
-    runs-on: ubuntu-latest
-    permissions:
-      id-token: write
-      contents: read
-    steps:
-      - name: Download distribution artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: python-package-distributions
-          path: dist/
-
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           repository-url: ${{ github.event.inputs.target_env == 'testpypi' && 'https://test.pypi.org/legacy/' || '' }}
           password: ${{ secrets.PYPI_API_TOKEN }}
           skip-existing: true
+
+      - name: Create or Update GitHub Release Tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="v${{ needs.check-version.outputs.local_version }}"
+          echo "Syncing GitHub release for tag: $TAG"
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            echo "Release $TAG already exists, uploading new assets if any."
+            gh release upload "$TAG" dist/* --clobber || true
+          else
+            echo "Creating new release $TAG"
+            gh release create "$TAG" dist/* \
+              --title "Release $TAG" \
+              --generate-notes
+          fi
