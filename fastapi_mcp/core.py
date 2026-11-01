@@ -312,6 +312,7 @@ class FastAPIMCP(FastAPI):
         tools = self.scanner.scan()
         added_names = []
         for name, doc, runner in tools:
+            setattr(runner, "_is_dual_tool", True)
             self._tool_catalog[name] = (name, doc, runner)
             if not self.librarian:
                 if name not in self._registered_tool_names:
@@ -366,6 +367,7 @@ class FastAPIMCP(FastAPI):
             else:
                 runner = func
 
+            setattr(runner, "_is_dual_tool", True)
             self._tool_catalog[name] = (name, doc, runner)
 
             if not self.librarian:
@@ -394,6 +396,7 @@ class FastAPIMCP(FastAPI):
         def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
             t_name = sanitize_tool_name(name or func.__name__)
             t_doc = description or func.__doc__ or ""
+            setattr(func, "_is_dual_tool", False)
             self._tool_catalog[t_name] = (t_name, t_doc, func)
             if not self.librarian:
                 self.mcp_server.add_tool(func, name=t_name, description=t_doc, **kwargs)
@@ -454,6 +457,7 @@ class FastAPIMCP(FastAPI):
                 mcp_path=mcp_path,
                 sse_path=sse_path,
                 ui_path=ui_path,
+                catalog=self._tool_catalog,
             )
             return HTMLResponse(html)
 
