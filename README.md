@@ -229,23 +229,14 @@ if __name__ == "__main__":
 
 ---
 
-## 📖 Dual-Engine MCP Swagger Explorer (`/mcp/docs` & `/mcp/ui`)
+## 📖 Interactive MCP Swagger Explorer (`/mcp/docs`)
 
-FastAPI-MCP provides a seamless, hybrid documentation experience for your Model Context Protocol tools:
+FastAPI-MCP includes a visual explorer for your MCP tools, served right at `/mcp/docs`.
 
-1. **Official Swagger UI (`/mcp/docs`)**:
-   - The literal, official Swagger UI powered by OpenAPI 3.1.
-   - Built-in `curl` command generator, request schema validation, and "Try it out" live execution directly into `/mcp/tools/{tool_name}`.
-   - Groups tools cleanly by route tags or under `MCP Tools`.
-
-2. **100% Offline Standalone Explorer (`/mcp/ui`)**:
-   - Zero-CDN, air-gapped standalone HTML/CSS/JS explorer.
-   - Styled pixel-for-pixel to match Swagger UI's iconic design and buttons.
-   - Connects directly to in-process execution via `/mcp/ui/call`.
-
-3. **Dynamic MCP OpenAPI 3.1 Specification (`/mcp/openapi.json`)**:
-   - Machine-readable OpenAPI 3.1 contract of all your MCP tools.
-   - Ready for import into Postman, Insomnia, or client SDK generators.
+Features:
+- **Interactive Tool Catalog**: Inspect all tools, schemas, and parameter requirements.
+- **Live "Try It Out"**: Input fields for numbers, strings, booleans, and JSON objects.
+- **Instant Live Execution**: Trigger tool calls directly in the browser and see structured responses in real time.
 
 ---
 

@@ -185,42 +185,17 @@ def main() -> None:
     )
     results.append(ok)
 
-    # 12. Official MCP Swagger UI
+    # 12. Interactive MCP Swagger UI
     ok, _ = send_http_request(
-        "12. Official MCP Swagger Docs UI: GET /mcp/docs",
+        "12. Interactive MCP Swagger Docs UI",
         "/mcp/docs",
         method="GET",
     )
     results.append(ok)
 
-    # 13. Dynamic MCP OpenAPI Specification
+    # 13. FastMCP Tool Execution via UI Bridge
     ok, _ = send_http_request(
-        "13. Dynamic MCP OpenAPI Spec: GET /mcp/openapi.json",
-        "/mcp/openapi.json",
-        method="GET",
-    )
-    results.append(ok)
-
-    # 14. Offline Standalone Explorer
-    ok, _ = send_http_request(
-        "14. Offline Standalone Explorer: GET /mcp/ui",
-        "/mcp/ui",
-        method="GET",
-    )
-    results.append(ok)
-
-    # 15. Direct Tool Execution (Swagger UI Endpoint)
-    ok, _ = send_http_request(
-        "15. Direct Tool Execution: POST /mcp/tools/search_internal_knowledge",
-        "/mcp/tools/search_internal_knowledge",
-        method="POST",
-        data={"query": "production stability", "top_k": 2},
-    )
-    results.append(ok)
-
-    # 16. FastMCP Tool Execution via UI Bridge
-    ok, _ = send_http_request(
-        "16. FastMCP Tool Execution via UI Bridge: /mcp/ui/call",
+        "13. FastMCP Tool Execution: search_internal_knowledge",
         "/mcp/ui/call",
         method="POST",
         data={
@@ -230,9 +205,9 @@ def main() -> None:
     )
     results.append(ok)
 
-    # 17. FastMCP Native SSE Transport Endpoint
+    # 14. FastMCP Native SSE Transport Endpoint
     ok, _ = send_http_request(
-        "17. FastMCP Native SSE Transport: GET /sse/",
+        "14. FastMCP Native SSE Transport: GET /sse/",
         "/sse/",
         method="GET",
         headers={"Accept": "text/event-stream"},
