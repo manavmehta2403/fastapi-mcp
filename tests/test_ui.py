@@ -5,10 +5,15 @@ import httpx
 from fastapi import FastAPI
 from fastapi_mcp import FastAPIMCP
 from fastapi_mcp.ui import (
+    _build_tool_example,
+    _extract_tool_schema_and_meta,
+    _inline_defs,
+    _serialize_tool_for_ui,
     generate_mcp_openapi_spec,
     get_mcp_swagger_html,
     get_official_redoc_html,
     get_official_swagger_ui_html,
+    inject_nav_bar_into_html,
 )
 
 
@@ -196,6 +201,73 @@ def test_ui_generators_edge_branches():
     html_redoc_direct = get_official_redoc_html("DirectRedoc", "/custom/openapi.json")
     assert "DirectRedoc" in html_redoc_direct
     assert "fapm-nav-dock" in html_redoc_direct
+
+    # Test inject_nav_bar_into_html with no <body> tag
+    html_no_body = inject_nav_bar_into_html("<div>raw fragment</div>", "rest_swagger")
+    assert "fapm-nav-dock" in html_no_body
+
+    # Test _inline_defs with resolved and unresolved $ref
+    resolved_ref = _inline_defs({"$ref": "#/$defs/Sub", "extra": 1}, {"Sub": {"type": "string"}})
+    assert resolved_ref["type"] == "string"
+    assert resolved_ref["extra"] == 1
+
+    unresolved_ref = _inline_defs({"$ref": "#/$defs/Missing"}, {})
+    assert unresolved_ref["$ref"] == "#/$defs/Missing"
+
+    # Test _build_tool_example with nested objects and invalid props
+    ex_nested = _build_tool_example({
+        "obj": {"type": "object", "properties": {"sub_num": {"type": "number"}}},
+        "empty_obj": {"type": "object", "properties": None},
+        "invalid_prop": "not_a_dict",
+    })
+    assert ex_nested["obj"]["sub_num"] == 0
+    assert ex_nested["empty_obj"] == {}
+    assert "invalid_prop" not in ex_nested
+
+    # Test _extract_tool_schema_and_meta with non-dict/non-dump object
+    class NonDumpTool:
+        """Dummy tool."""
+        name = "nondump"
+        description = "desc"
+        input_schema = "invalid_non_dict"
+
+    _, _, schema_extracted = _extract_tool_schema_and_meta(NonDumpTool())
+    assert schema_extracted == {"type": "object", "properties": {}}
+
+    # Test _serialize_tool_for_ui with $defs in dict and object
+    t_dict_defs = {
+        "name": "dict_defs",
+        "input_schema": {
+            "type": "object",
+            "$defs": {"Node": {"type": "string"}},
+            "properties": {"n": {"$ref": "#/$defs/Node"}},
+        },
+    }
+    dumped_dict = _serialize_tool_for_ui(t_dict_defs)
+    assert dumped_dict["input_schema"]["properties"]["n"]["type"] == "string"
+
+    class ObjDefsTool:
+        """Dummy tool with defs."""
+        name = "obj_defs"
+        description = "desc"
+        input_schema = {
+            "type": "object",
+            "$defs": {"Leaf": {"type": "integer"}},
+            "properties": {"l": {"$ref": "#/$defs/Leaf"}},
+        }
+
+    dumped_obj = _serialize_tool_for_ui(ObjDefsTool())
+    assert dumped_obj["input_schema"]["properties"]["l"]["type"] == "integer"
+
+    class ObjNoneTool:
+        """Dummy tool with None."""
+        name = "obj_none"
+        description = "desc"
+        input_schema = None
+
+    dumped_none = _serialize_tool_for_ui(ObjNoneTool())
+    assert dumped_none["name"] == "obj_none"
+
 
 
 if __name__ == "__main__":
