@@ -43,6 +43,18 @@ class ToolCallRequest(BaseModel):
     arguments: Dict[str, Any] = {}
 
 
+class PromptCallRequest(BaseModel):
+    """Payload schema for rendering an MCP prompt template via the Studio UI.
+
+    Attributes:
+        name: Name of the registered MCP prompt to invoke.
+        arguments: Dictionary of arguments to fill into the prompt template.
+    """
+
+    name: str
+    arguments: Dict[str, Any] = {}
+
+
 class FastAPIMCP(FastAPI):
     """Unified FastAPI + FastMCP framework.
 
@@ -427,11 +439,14 @@ class FastAPIMCP(FastAPI):
         sse_path: str = "/sse",
     ) -> None:
         """Registers interactive MCP Swagger UI, ReDoc, and Studio endpoints."""
+        # pylint: disable=too-many-statements
         docs_path = f"{mcp_path.rstrip('/')}/docs"
         redoc_path = f"{mcp_path.rstrip('/')}/redoc"
         ui_path = f"{mcp_path.rstrip('/')}/ui"
         openapi_path = f"{mcp_path.rstrip('/')}/openapi.json"
         call_path = f"{mcp_path.rstrip('/')}/ui/call"
+        resource_path = f"{mcp_path.rstrip('/')}/ui/resource"
+        prompt_path = f"{mcp_path.rstrip('/')}/ui/prompt"
         tools_pattern = f"{mcp_path.rstrip('/')}/tools/{{tool_name}}"
 
         paths = NavPaths(
@@ -488,15 +503,65 @@ class FastAPIMCP(FastAPI):
         @target_app.get(ui_path, response_class=HTMLResponse, include_in_schema=False)
         async def mcp_offline_ui():
             tools = await self.list_tools()
+            resources = await self.list_resources()
+            prompts = await self.list_prompts()
             title = self.mcp_name + (" [Librarian Active]" if self.librarian else "")
             html = get_mcp_swagger_html(
                 title=title,
                 tools=tools,
+                resources=resources,
+                prompts=prompts,
                 call_url=call_path,
+                resource_url=resource_path,
+                prompt_url=prompt_path,
                 paths=paths,
                 catalog=self._tool_catalog,
             )
             return HTMLResponse(html)
+
+        @target_app.get(resource_path, include_in_schema=False)
+        async def mcp_ui_resource(uri: str):
+            try:
+                res = await self.read_resource(uri)
+                contents = []
+                if isinstance(res, (list, tuple)):
+                    for item in res:
+                        c = getattr(item, "content", None)
+                        mt = getattr(item, "mime_type", "text/plain")
+                        contents.append({
+                            "content": c if c is not None else str(item),
+                            "mime_type": mt or "text/plain",
+                        })
+                else:
+                    c = getattr(res, "content", None)
+                    mt = getattr(res, "mime_type", "text/plain")
+                    contents.append({
+                        "content": c if c is not None else str(res),
+                        "mime_type": mt or "text/plain",
+                    })
+                return {"success": True, "contents": contents}
+            except Exception as e:  # pylint: disable=broad-exception-caught
+                return JSONResponse(
+                    status_code=400,
+                    content={"is_error": True, "error": str(e)},
+                )
+
+        @target_app.post(prompt_path, include_in_schema=False)
+        async def mcp_ui_prompt(req: PromptCallRequest):
+            try:
+                p_result = await self.get_prompt(req.name, req.arguments)
+                messages = []
+                for m in getattr(p_result, "messages", []) or []:
+                    role = getattr(m, "role", "user")
+                    c = getattr(m, "content", "")
+                    text_val = getattr(c, "text", str(c)) if hasattr(c, "text") else str(c)
+                    messages.append({"role": role, "text": text_val})
+                return {"success": True, "messages": messages}
+            except Exception as e:  # pylint: disable=broad-exception-caught
+                return JSONResponse(
+                    status_code=400,
+                    content={"is_error": True, "error": str(e)},
+                )
 
         @target_app.post(tools_pattern, include_in_schema=False)
         async def mcp_tool_direct_call(tool_name: str, request: Request):
@@ -640,6 +705,24 @@ class FastAPIMCP(FastAPI):
         if not self._scanned and self.auto_scan:
             self.scan_routes()
         return await self.mcp_server.list_tools()
+
+    async def list_resources(self) -> List[Any]:
+        """List all registered MCP resources."""
+        return await self.mcp_server.list_resources()
+
+    async def read_resource(self, uri: str) -> Any:
+        """Read a registered MCP resource by URI."""
+        return await self.mcp_server.read_resource(uri)
+
+    async def list_prompts(self) -> List[Any]:
+        """List all registered MCP prompts."""
+        return await self.mcp_server.list_prompts()
+
+    async def get_prompt(
+        self, name: str, arguments: Optional[Dict[str, Any]] = None
+    ) -> Any:
+        """Get/render a registered MCP prompt by name and arguments."""
+        return await self.mcp_server.get_prompt(name, arguments or {})
 
     async def call_tool(self, name: str, arguments: Optional[Dict[str, Any]] = None) -> Any:
         """Call a registered tool programmatically."""
