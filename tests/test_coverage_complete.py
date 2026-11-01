@@ -543,9 +543,21 @@ def test_lifespan_and_mounting_fallbacks(monkeypatch):
 @pytest.mark.asyncio
 async def test_version_and_http_query_decorator():
     """Test __version__ and @app.query decorator for RFC 10008 HTTP QUERY method."""
+    import re
+    from pathlib import Path
     import fastapi_mcp
 
-    assert fastapi_mcp.__version__ == "0.2.0"
+    # Enforce strict cross-file version synchronization
+    root_dir = Path(__file__).resolve().parent.parent
+    with open(root_dir / "pyproject.toml", "r", encoding="utf-8") as f:
+        pyproj_match = re.search(r'version\s*=\s*"([^"]+)"', f.read())
+        pyproj_ver = pyproj_match.group(1) if pyproj_match else None
+
+    with open(root_dir / "fastapi_mcp" / "ui.py", "r", encoding="utf-8") as f:
+        ui_match = re.search(r'class="fapm-badge-ver">v?([0-9\.]+)<', f.read())
+        ui_ver = ui_match.group(1) if ui_match else None
+
+    assert pyproj_ver == fastapi_mcp.__version__ == ui_ver == "0.2.0"
 
     app = FastAPIMCP(auto_scan=True)
 
