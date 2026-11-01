@@ -129,8 +129,9 @@ STUDIO_HTML_TEMPLATE = """<!DOCTYPE html>
         <span class="prim-counter" id="cnt-prompts">0</span>
       </button>
     </div>
-    <div style="font-size: 11px; color: #8b949e;">
-      <span>FastMCP Engine Active</span>
+    <div style="display:flex; align-items:center; gap:10px;">
+      <a href="{openapi_url}" target="_blank" download="mcp-openapi.json" class="fapm-btn-connect" style="text-decoration:none;" title="Download OpenAPI 3.1 JSON Specification">📥 Export Spec</a>
+      <span style="font-size: 11px; color: #8b949e;">FastMCP Engine Active</span>
     </div>
   </div>
 
@@ -142,7 +143,7 @@ STUDIO_HTML_TEMPLATE = """<!DOCTYPE html>
           <span class="offline-tag">Offline Mode</span>
         </div>
         <input type="text" id="search-input" class="search-input"
-               placeholder="🔍 Search..." oninput="filterActiveItems()">
+               placeholder="🔍 Search items... (/ or Ctrl+K)" oninput="filterActiveItems()">
         <div class="filter-pills" id="tools-filter-pills">
           <button class="pill-btn active" id="pill-all"
                   onclick="setToolFilter('all')">All</button>
@@ -309,6 +310,18 @@ STUDIO_HTML_TEMPLATE = """<!DOCTYPE html>
       const container = document.getElementById('workspace-content');
 
       if (activeStudioTab === 'tools') {
+        if (toolsData.length === 0) {
+          container.innerHTML = `
+            <div class="workspace-card" style="text-align:center; padding: 40px 20px;">
+              <div style="font-size: 32px; margin-bottom: 12px;">🛠️</div>
+              <h3 style="font-size: 16px; margin: 0 0 8px 0; color: #fff;">No MCP Tools Registered</h3>
+              <p style="color: #8b949e; font-size: 13px; max-width: 480px; margin: 0 auto 16px auto;">
+                Convert standard FastAPI routes using <code>@app.api_tool()</code>, or register dedicated tools with <code>@app.tool()</code>.
+              </p>
+            </div>
+          `;
+          return;
+        }
         const tool = toolsData[toolIndex];
         if (!tool) {
           container.innerHTML = '<div style="color:#8b949e;padding:20px;">Select a tool.</div>';
@@ -357,6 +370,7 @@ STUDIO_HTML_TEMPLATE = """<!DOCTYPE html>
                 <span>${tool.name}</span>
                 <span class="badge-type ${isDual ? 'badge-dual' : 'badge-mcp'}">${isDual ? 'REST + MCP DUAL' : 'MCP DEDICATED'}</span>
               </div>
+              <button type="button" class="pill-btn" onclick="copyToolSchema()" title="Copy Tool input schema as JSON">📋 Copy Schema</button>
             </div>
             <div class="workspace-desc">${tool.description || 'No description provided.'}</div>
           </div>
@@ -401,6 +415,18 @@ STUDIO_HTML_TEMPLATE = """<!DOCTYPE html>
         `;
         showSnippet('py', tool.name);
       } else if (activeStudioTab === 'resources') {
+        if (resourcesData.length === 0) {
+          container.innerHTML = `
+            <div class="workspace-card" style="text-align:center; padding: 40px 20px;">
+              <div style="font-size: 32px; margin-bottom: 12px;">📦</div>
+              <h3 style="font-size: 16px; margin: 0 0 8px 0; color: #fff;">No MCP Resources Registered</h3>
+              <p style="color: #8b949e; font-size: 13px; max-width: 480px; margin: 0 auto 16px auto;">
+                Expose contextual application state, files, or documents to AI models using <code>@app.resource("scheme://path")</code>.
+              </p>
+            </div>
+          `;
+          return;
+        }
         const res = resourcesData[resourceIndex];
         if (!res) {
           container.innerHTML = '<div style="color:#8b949e;padding:20px;">No resource selected.</div>';
@@ -434,6 +460,18 @@ STUDIO_HTML_TEMPLATE = """<!DOCTYPE html>
           </div>
         `;
       } else {
+        if (promptsData.length === 0) {
+          container.innerHTML = `
+            <div class="workspace-card" style="text-align:center; padding: 40px 20px;">
+              <div style="font-size: 32px; margin-bottom: 12px;">💬</div>
+              <h3 style="font-size: 16px; margin: 0 0 8px 0; color: #fff;">No MCP Prompts Registered</h3>
+              <p style="color: #8b949e; font-size: 13px; max-width: 480px; margin: 0 auto 16px auto;">
+                Provide standardized, parameterized prompt templates to AI models using <code>@app.prompt("name")</code>.
+              </p>
+            </div>
+          `;
+          return;
+        }
         const prompt = promptsData[promptIndex];
         if (!prompt) {
           container.innerHTML = '<div style="color:#8b949e;padding:20px;">No prompt selected.</div>';
@@ -649,8 +687,30 @@ STUDIO_HTML_TEMPLATE = """<!DOCTYPE html>
       navigator.clipboard.writeText(text).then(() => alert('Prompt copied!'));
     }
 
+    function copyToolSchema() {
+      const tool = toolsData[toolIndex];
+      if (!tool) return;
+      const schemaStr = JSON.stringify(tool.input_schema || {}, null, 2);
+      navigator.clipboard.writeText(schemaStr).then(() => {
+        alert("Tool JSON Schema copied to clipboard!");
+      });
+    }
+
     document.addEventListener('keydown', (e) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+      if ((e.key === '/' || (e.ctrlKey && e.key.toLowerCase() === 'k')) &&
+          document.activeElement.tagName !== 'INPUT' &&
+          document.activeElement.tagName !== 'TEXTAREA') {
+        e.preventDefault();
+        const inp = document.getElementById('search-input');
+        if (inp) { inp.focus(); inp.select(); }
+      } else if (e.key === 'Escape') {
+        const inp = document.getElementById('search-input');
+        if (inp && document.activeElement === inp) {
+          inp.value = '';
+          filterActiveItems();
+          inp.blur();
+        }
+      } else if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
         const form = document.getElementById('tool-form');
         if (form) form.requestSubmit();
       }

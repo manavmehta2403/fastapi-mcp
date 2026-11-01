@@ -276,6 +276,7 @@ def test_ui_generators_edge_branches():
 
 def test_mcp_studio_resources_and_prompts():
     """Test MCP Studio Resources, Prompts, and their interactive UI endpoints."""
+    # pylint: disable=too-many-statements
     app = FastAPIMCP(title="StudioStudioDemo", mcp_name="StudioDemo")
 
     @app.tool(name="add_nums")
@@ -322,6 +323,11 @@ def test_mcp_studio_resources_and_prompts():
             assert "add_nums" in res_ui.text
             assert "system://health" in res_ui.text
             assert "debug_helper" in res_ui.text
+            assert "Export Spec" in res_ui.text
+            assert "Copy Schema" in res_ui.text
+            assert "No MCP Tools Registered" in res_ui.text
+            assert "No MCP Resources Registered" in res_ui.text
+            assert "No MCP Prompts Registered" in res_ui.text
 
             # Live resource read endpoint
             res_live = await client.get("/mcp/ui/resource?uri=system%3A%2F%2Fhealth")

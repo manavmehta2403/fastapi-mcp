@@ -62,7 +62,7 @@ def render_nav_bar(
       <a href="{p.ui_path}" class="fapm-nav-brand">
         <span class="fapm-brand-logo">⚡ FastMCP</span>
         <span class="fapm-brand-title">{title}</span>
-        <span class="fapm-badge-ver">v0.1.1</span>
+        <span class="fapm-badge-ver">v0.2.0</span>
       </a>
 
       <div class="fapm-nav-tabs">
@@ -570,12 +570,14 @@ def get_mcp_swagger_html(
     call_url: str = "/mcp/ui/call",
     resource_url: str = "/mcp/ui/resource",
     prompt_url: str = "/mcp/ui/prompt",
+    openapi_url: Optional[str] = None,
     paths: Optional[NavPaths] = None,
     catalog: Optional[Dict[str, Any]] = None,
     **kwargs: Any,
 ) -> str:
     """Renders the standalone FastAPI-MCP Studio supporting Tools, Resources, and Prompts."""
     p = _resolve_paths(paths, **kwargs)
+    spec_url = openapi_url or f"{p.mcp_path.rstrip('/')}/openapi.json"
     tools_json = json.dumps([_serialize_tool_for_ui(t, catalog=catalog) for t in tools])
     resources_json = json.dumps([_serialize_resource_for_ui(r) for r in (resources or [])])
     prompts_json = json.dumps([_serialize_prompt_for_ui(pr) for pr in (prompts or [])])
@@ -595,4 +597,5 @@ def get_mcp_swagger_html(
         .replace("{call_url}", call_url)
         .replace("{resource_url}", resource_url)
         .replace("{prompt_url}", prompt_url)
+        .replace("{openapi_url}", spec_url)
     )
