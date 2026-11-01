@@ -284,6 +284,84 @@ OFFLINE_HTML_TEMPLATE = """<!DOCTYPE html>
       padding: 48px;
       color: var(--text-muted);
     }}
+    .badge-dual {{
+      background: #238636 !important;
+    }}
+    .badge-mcp {{
+      background: #1f6feb !important;
+    }}
+    .quick-connect {{
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      margin-bottom: 24px;
+      overflow: hidden;
+    }}
+    .qc-toggle {{
+      padding: 12px 16px;
+      background: rgba(88, 166, 255, 0.08);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 600;
+      color: #58a6ff;
+      user-select: none;
+    }}
+    .qc-toggle:hover {{
+      background: rgba(88, 166, 255, 0.14);
+    }}
+    .qc-body {{
+      display: none;
+      padding: 16px;
+      border-top: 1px solid var(--border);
+      background: #0d1117;
+    }}
+    .qc-grid {{
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }}
+    @media (max-width: 768px) {{
+      .qc-grid {{ grid-template-columns: 1fr; }}
+    }}
+    .qc-box {{
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 12px;
+      position: relative;
+    }}
+    .qc-box-title {{
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 12px;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }}
+    .qc-pre {{
+      margin: 0;
+      font-family: monospace;
+      font-size: 11px;
+      color: #e6edf3;
+      white-space: pre;
+      overflow-x: auto;
+    }}
+    .copy-btn {{
+      background: #21262d;
+      border: 1px solid var(--border);
+      color: #c9d1d9;
+      padding: 3px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      cursor: pointer;
+    }}
+    .copy-btn:hover {{
+      background: #30363d;
+      color: #fff;
+    }}
   </style>
 </head>
 <body>
@@ -320,12 +398,78 @@ OFFLINE_HTML_TEMPLATE = """<!DOCTYPE html>
       </div>
     </header>
 
+    <div class="quick-connect">
+      <div class="qc-toggle" onclick="toggleQuickConnect()">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span>🔌</span>
+          <span>Connect Local AI Agents (Claude Desktop &amp; Cursor)</span>
+        </div>
+        <span id="qc-chevron" style="font-size: 12px;">▼ Show Config</span>
+      </div>
+      <div id="quick-connect-body" class="qc-body">
+        <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 12px;">
+          Add this server to your local Claude Desktop or Cursor configuration to let AI agents use these tools:
+        </p>
+        <div class="qc-grid">
+          <div class="qc-box">
+            <div class="qc-box-title">
+              <span style="color: #58a6ff;">Claude Desktop (claude_desktop_config.json)</span>
+              <button class="copy-btn" onclick="copySnippet('claude-cfg', this)">📋 Copy</button>
+            </div>
+            <pre id="claude-cfg" class="qc-pre">&#123;
+  "mcpServers": &#123;
+    "fastapi-mcp": &#123;
+      "url": "http://127.0.0.1:8000{mcp_path}"
+    &#125;
+  &#125;
+&#125;</pre>
+          </div>
+          <div class="qc-box">
+            <div class="qc-box-title">
+              <span style="color: #7ee787;">Cursor IDE (.cursor/mcp.json)</span>
+              <button class="copy-btn" onclick="copySnippet('cursor-cfg', this)">📋 Copy</button>
+            </div>
+            <pre id="cursor-cfg" class="qc-pre">&#123;
+  "mcpServers": &#123;
+    "fastapi-mcp": &#123;
+      "url": "http://127.0.0.1:8000{mcp_path}"
+    &#125;
+  &#125;
+&#125;</pre>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div id="tools-container"></div>
   </div>
 
   <script>
     const toolsData = {tools_json};
     const testCallUrl = "{call_url}";
+
+    function toggleQuickConnect() {{
+      const body = document.getElementById("quick-connect-body");
+      const chevron = document.getElementById("qc-chevron");
+      if (body.style.display === "none" || !body.style.display) {{
+        body.style.display = "block";
+        chevron.innerText = "▲ Hide Config";
+      }} else {{
+        body.style.display = "none";
+        chevron.innerText = "▼ Show Config";
+      }}
+    }}
+
+    function copySnippet(elementId, btn) {{
+      const text = document.getElementById(elementId).innerText;
+      navigator.clipboard.writeText(text).then(() => {{
+        const orig = btn.innerText;
+        btn.innerText = "✓ Copied!";
+        setTimeout(() => {{ btn.innerText = orig; }}, 2000);
+      }}).catch(() => {{
+        btn.innerText = "Copy manually";
+      }});
+    }}
 
     function renderTools() {{
       const container = document.getElementById("tools-container");
@@ -388,7 +532,7 @@ OFFLINE_HTML_TEMPLATE = """<!DOCTYPE html>
           <div class="card" id="card-${idx}">
             <div class="card-header" onclick="toggleCard(${idx})">
               <div class="card-title-group">
-                <span class="tool-method">TOOL</span>
+                <span class="tool-method ${tool.tool_type === 'REST + MCP' ? 'badge-dual' : 'badge-mcp'}">${tool.tool_type || 'MCP TOOL'}</span>
                 <div>
                   <div class="tool-name">${tool.name}</div>
                   <div class="tool-desc">${tool.description || 'No description provided'}</div>
@@ -477,6 +621,7 @@ OFFLINE_HTML_TEMPLATE = """<!DOCTYPE html>
       badge.innerText = "Executing...";
       outText.innerText = "Calling MCP tool in-process...";
 
+      const startTime = performance.now();
       try {{
         const resp = await fetch(testCallUrl, {{
           method: 'POST',
@@ -484,21 +629,23 @@ OFFLINE_HTML_TEMPLATE = """<!DOCTYPE html>
           body: JSON.stringify({{ name: toolName, arguments: args }})
         }});
         const data = await resp.json();
+        const duration = Math.round(performance.now() - startTime);
         btn.disabled = false;
         btn.innerText = "⚡ Execute Tool";
 
         if (!resp.ok || data.is_error) {{
           outBox.classList.add('output-error');
-          badge.innerText = `${resp.status || 400} Error`;
+          badge.innerText = `${resp.status || 400} Error (${duration}ms)`;
         }} else {{
-          badge.innerText = "200 OK";
+          badge.innerText = `200 OK (${duration}ms)`;
         }}
         outText.innerText = JSON.stringify(data, null, 2);
       }} catch (err) {{
+        const duration = Math.round(performance.now() - startTime);
         btn.disabled = false;
         btn.innerText = "⚡ Execute Tool";
         outBox.classList.add('output-error');
-        badge.innerText = "Network Error";
+        badge.innerText = `Network Error (${duration}ms)`;
         outText.innerText = `Error connecting to test runner: ${err.message}`;
       }}
     }}
@@ -618,6 +765,10 @@ def generate_mcp_openapi_spec(
             runner_tags = getattr(runner, "_mcp_tags", None)
             if runner_tags:
                 tags = list(runner_tags)
+            elif getattr(runner, "_is_dual_tool", False):
+                tags = ["REST + MCP Tools"]
+            else:
+                tags = ["MCP Dedicated Tools"]
 
         props = schema_dict.get("properties", {})
         example_body = _build_tool_example(props)
@@ -699,9 +850,10 @@ def get_official_swagger_ui_html(
     mcp_path: str = "/mcp",
     sse_path: str = "/sse",
     ui_path: str = "/mcp/ui",
+    catalog: Optional[Dict[str, Any]] = None,
 ) -> str:
     """Renders the official Swagger UI embedding the generated OpenAPI specification."""
-    del mcp_path, sse_path
+    del mcp_path, sse_path, catalog
     swagger_ui_params = {
         "spec": spec,
         "deepLinking": True,
@@ -740,6 +892,10 @@ def get_official_swagger_ui_html(
         'text-decoration: none; padding-bottom: 2px;">📄 openapi.json ↗</a>\n'
         '    <a href="/docs" target="_blank" style="color: #c9d1d9; text-decoration: none; '
         'padding-bottom: 2px;">🌐 REST API /docs ↗</a>\n'
+        '    <a href="javascript:void(0)" onclick="alert(\'Claude Desktop & Cursor Config:\\n\\n'
+        '{\\n  \\\"mcpServers\\\": {\\n    \\\"fastapi-mcp\\\": {\\n      '
+        '\\\"url\\\": \\\"http://127.0.0.1:8000/mcp\\\"\\n    }\\n  }\\n}\')" '
+        'style="color: #58a6ff; text-decoration: none; padding-bottom: 2px;">🔌 Connect Client</a>\n'
         '  </div>\n'
         '</div>'
     )
@@ -748,8 +904,22 @@ def get_official_swagger_ui_html(
     return raw_html
 
 
-def _serialize_tool_for_ui(tool: Any) -> Dict[str, Any]:
+def _serialize_tool_for_ui(
+    tool: Any,
+    catalog: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     """Helper to convert any Tool object or dict into a JSON-serializable dictionary."""
+    catalog = catalog or {}
+    tool_name = (
+        getattr(tool, "name", "tool")
+        if not isinstance(tool, dict)
+        else tool.get("name", "tool")
+    )
+    is_dual = False
+    if tool_name in catalog:
+        _, _, runner = catalog[tool_name]
+        is_dual = bool(getattr(runner, "_is_dual_tool", False))
+
     if hasattr(tool, "model_dump"):
         dumped = tool.model_dump()
         raw_in = dumped.get("input_schema")
@@ -757,6 +927,7 @@ def _serialize_tool_for_ui(tool: Any) -> Dict[str, Any]:
             defs = raw_in.get("$defs", {})
             if isinstance(defs, dict) and defs:
                 dumped["input_schema"] = _inline_defs(raw_in, defs)
+        dumped["tool_type"] = "REST + MCP" if is_dual else "MCP ONLY"
         return dumped
     if isinstance(tool, dict):
         tool_copy = copy.deepcopy(tool)
@@ -765,6 +936,7 @@ def _serialize_tool_for_ui(tool: Any) -> Dict[str, Any]:
             defs = raw_in.get("$defs", {})
             if isinstance(defs, dict) and defs:
                 tool_copy["input_schema"] = _inline_defs(raw_in, defs)
+        tool_copy["tool_type"] = "REST + MCP" if is_dual else "MCP ONLY"
         return tool_copy
     raw_schema = (
         getattr(tool, "input_schema", None)
@@ -783,6 +955,7 @@ def _serialize_tool_for_ui(tool: Any) -> Dict[str, Any]:
         "name": getattr(tool, "name", "tool"),
         "description": getattr(tool, "description", ""),
         "input_schema": schema_dict,
+        "tool_type": "REST + MCP" if is_dual else "MCP ONLY",
     }
 
 
@@ -795,9 +968,10 @@ def get_mcp_swagger_html(
     docs_path: str = "/mcp/docs",
     openapi_path: str = "/mcp/openapi.json",
     ui_path: str = "/mcp/ui",
+    catalog: Optional[Dict[str, Any]] = None,
 ) -> str:
     """Renders the standalone offline Swagger-inspired MCP HTML page."""
-    tools_json = json.dumps([_serialize_tool_for_ui(t) for t in tools])
+    tools_json = json.dumps([_serialize_tool_for_ui(t, catalog=catalog) for t in tools])
     return (
         OFFLINE_HTML_TEMPLATE.replace("{title}", title)
         .replace("{tools_json}", tools_json)
