@@ -7,6 +7,7 @@ from fastapi_mcp import FastAPIMCP
 from fastapi_mcp.ui import (
     generate_mcp_openapi_spec,
     get_mcp_swagger_html,
+    get_official_redoc_html,
     get_official_swagger_ui_html,
 )
 
@@ -25,7 +26,7 @@ def test_mcp_swagger_ui():
         """Return raw string."""
         return "plain result"
 
-    mcp = FastAPIMCP.bind(app, name="UIExplorerDemo")
+    FastAPIMCP.bind(app, name="UIExplorerDemo")
 
     async def run_checks():
         transport = httpx.ASGITransport(app=app)
@@ -37,6 +38,22 @@ def test_mcp_swagger_ui():
             assert "MCP Swagger Explorer" in res_docs.text
             assert "UIExplorerDemo" in res_docs.text
             assert "add" in res_docs.text
+
+                        # 1b. Test /mcp/redoc returns 200 and Official ReDoc UI with navigation
+            res_mcp_redoc = await client.get("/mcp/redoc")
+            assert res_mcp_redoc.status_code == 200
+            assert "text/html" in res_mcp_redoc.headers["content-type"]
+            assert "redoc" in res_mcp_redoc.text.lower()
+            assert "fapm-nav-dock" in res_mcp_redoc.text
+
+            # 1c. Test REST /docs and /redoc have unified navigation dock injected
+            res_rest_docs = await client.get("/docs")
+            assert res_rest_docs.status_code == 200
+            assert "fapm-nav-dock" in res_rest_docs.text
+
+            res_rest_redoc = await client.get("/redoc")
+            assert res_rest_redoc.status_code == 200
+            assert "fapm-nav-dock" in res_rest_redoc.text
 
             # 2. Test /mcp/openapi.json returns valid OpenAPI 3.1 schema
             res_spec = await client.get("/mcp/openapi.json")
@@ -174,6 +191,11 @@ def test_ui_generators_edge_branches():
     dummy_spec = {"openapi": "3.1.0", "paths": {}}
     html_fallback = get_official_swagger_ui_html("Test", "/mcp/openapi.json", dummy_spec)
     assert "FastMCP" in html_fallback
+
+    # Test get_official_redoc_html directly
+    html_redoc_direct = get_official_redoc_html("DirectRedoc", "/custom/openapi.json")
+    assert "DirectRedoc" in html_redoc_direct
+    assert "fapm-nav-dock" in html_redoc_direct
 
 
 if __name__ == "__main__":

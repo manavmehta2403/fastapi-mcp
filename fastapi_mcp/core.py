@@ -18,12 +18,16 @@ from mcp.server.mcpserver import MCPServer
 from pydantic import BaseModel
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse
+from starlette.routing import request_response
 
 from .scanner import RouteScanner, sanitize_tool_name
 from .ui import (
+    NavPaths,
     generate_mcp_openapi_spec,
     get_mcp_swagger_html,
+    get_official_redoc_html,
     get_official_swagger_ui_html,
+    inject_nav_bar_into_html,
 )
 
 
@@ -422,12 +426,23 @@ class FastAPIMCP(FastAPI):
         mcp_path: str = "/mcp",
         sse_path: str = "/sse",
     ) -> None:
-        """Registers the interactive MCP Swagger UI at {mcp_path}/docs and {mcp_path}/ui."""
+        """Registers interactive MCP Swagger UI, ReDoc, and Studio endpoints."""
         docs_path = f"{mcp_path.rstrip('/')}/docs"
+        redoc_path = f"{mcp_path.rstrip('/')}/redoc"
         ui_path = f"{mcp_path.rstrip('/')}/ui"
         openapi_path = f"{mcp_path.rstrip('/')}/openapi.json"
         call_path = f"{mcp_path.rstrip('/')}/ui/call"
         tools_pattern = f"{mcp_path.rstrip('/')}/tools/{{tool_name}}"
+
+        paths = NavPaths(
+            mcp_path=mcp_path,
+            sse_path=sse_path,
+            docs_path=docs_path,
+            redoc_path=redoc_path,
+            ui_path=ui_path,
+            rest_docs_url=getattr(target_app, "docs_url", "/docs") or "/docs",
+            rest_redoc_url=getattr(target_app, "redoc_url", "/redoc") or "/redoc",
+        )
 
         @target_app.get(openapi_path, include_in_schema=False)
         async def mcp_openapi_spec():
@@ -454,9 +469,18 @@ class FastAPIMCP(FastAPI):
                 title=f"{title} - MCP Swagger Explorer",
                 openapi_url=openapi_path,
                 spec=spec,
-                mcp_path=mcp_path,
-                sse_path=sse_path,
-                ui_path=ui_path,
+                paths=paths,
+                catalog=self._tool_catalog,
+            )
+            return HTMLResponse(html)
+
+        @target_app.get(redoc_path, response_class=HTMLResponse, include_in_schema=False)
+        async def mcp_official_redoc():
+            title = self.mcp_name + (" [Librarian Active]" if self.librarian else "")
+            html = get_official_redoc_html(
+                title=f"{title} - MCP ReDoc",
+                openapi_url=openapi_path,
+                paths=paths,
                 catalog=self._tool_catalog,
             )
             return HTMLResponse(html)
@@ -468,12 +492,9 @@ class FastAPIMCP(FastAPI):
             html = get_mcp_swagger_html(
                 title=title,
                 tools=tools,
-                mcp_path=mcp_path,
-                sse_path=sse_path,
                 call_url=call_path,
-                docs_path=docs_path,
-                openapi_path=openapi_path,
-                ui_path=ui_path,
+                paths=paths,
+                catalog=self._tool_catalog,
             )
             return HTMLResponse(html)
 
@@ -519,6 +540,51 @@ class FastAPIMCP(FastAPI):
                     return {"success": True, "result": output_str}
             except Exception as e:  # pylint: disable=broad-exception-caught
                 return {"is_error": True, "error": str(e)}
+
+        self._inject_target_app_docs_nav(target_app=target_app, paths=paths)
+
+    def _inject_target_app_docs_nav(
+        self,
+        target_app: FastAPI,
+        paths: NavPaths,
+    ) -> None:
+        """Wraps target_app /docs and /redoc to inject unified documentation navigation."""
+        for route in getattr(target_app, "routes", []):
+            r_path = getattr(route, "path", None)
+            if (
+                r_path in (paths.rest_docs_url, paths.rest_redoc_url)
+                and hasattr(route, "endpoint")
+            ):
+                if getattr(route.endpoint, "_fapm_injected", False):
+                    continue
+
+                curr = "rest_swagger" if r_path == paths.rest_docs_url else "rest_redoc"
+                orig_endpoint = route.endpoint
+
+                def make_wrapper(orig, current_page):
+                    async def wrapped(*args: Any, **kwargs: Any) -> Any:
+                        resp = (
+                            await orig(*args, **kwargs)
+                            if inspect.iscoroutinefunction(orig)
+                            else orig(*args, **kwargs)
+                        )
+                        if isinstance(resp, HTMLResponse):
+                            body = resp.body.decode()
+                            injected = inject_nav_bar_into_html(
+                                html=body,
+                                current_page=current_page,
+                                title=getattr(target_app, "title", "API Docs"),
+                                paths=paths,
+                            )
+                            return HTMLResponse(content=injected, status_code=resp.status_code)
+                        return resp
+
+                    wrapped._fapm_injected = True  # pylint: disable=protected-access
+                    return wrapped
+
+                route.endpoint = make_wrapper(orig_endpoint, curr)
+                if hasattr(route, "app"):
+                    route.app = request_response(route.endpoint)
 
     def mount_to(
         self,

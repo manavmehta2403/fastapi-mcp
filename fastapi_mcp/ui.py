@@ -1,660 +1,265 @@
-"""Interactive Swagger-style UI for FastMCP / Model Context Protocol.
+"""Interactive documentation and developer studio for FastAPI-MCP.
 
-Provides an interactive playground at `/mcp/docs` (Official Swagger UI)
-and `/mcp/ui` (100% Offline Standalone Explorer) where developers can inspect
-registered tools, view schemas, fill in parameters, and execute tools live in the browser.
+Provides:
+- `/mcp/docs`: Official Swagger UI for MCP tools with unified navigation
+- `/mcp/redoc`: Official ReDoc UI for MCP tools with unified navigation
+- `/mcp/ui`: Standalone, zero-dependency Developer Studio with two-column layout
+- Unified navigation dock bridging REST (/docs, /redoc) and MCP documentation
 """
 
 import copy
+from dataclasses import dataclass
 import json
 from typing import Any, Dict, List, Optional, Tuple
-from fastapi.openapi.docs import get_swagger_ui_html
+from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
+from fastapi_mcp.templates import NAV_CSS, STUDIO_HTML_TEMPLATE
 
-OFFLINE_HTML_TEMPLATE = """<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>{title} - MCP Swagger Explorer</title>
-  <style>
-    :root {{
-      --bg: #0d1117;
-      --card-bg: #161b22;
-      --border: #30363d;
-      --text: #c9d1d9;
-      --text-muted: #8b949e;
-      --primary: #4990e2;
-      --primary-hover: #357ebd;
-      --success: #49cc90;
-      --badge-tool: #4990e2;
-      --code-bg: #090d13;
-    }}
-    * {{ box-sizing: border-box; margin: 0; padding: 0; }}
-    body {{
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background-color: var(--bg);
-      color: var(--text);
-      line-height: 1.5;
-    }}
-    .top-nav {{
-      background: #1b1b1b;
-      padding: 12px 24px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      border-bottom: 2px solid #49cc90;
-    }}
-    .top-nav-brand {{
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    }}
-    .top-nav-title {{
-      color: #ffffff;
-      font-size: 14px;
-      font-weight: 600;
-    }}
-    .top-nav-links {{
-      display: flex;
-      gap: 16px;
-      font-size: 13px;
-    }}
-    .top-nav-links a {{
-      text-decoration: none;
-      transition: color 0.15s;
-    }}
-    .container {{
-      max-width: 1050px;
-      margin: 24px auto;
-      padding: 0 16px;
-    }}
-    header {{
-      margin-bottom: 24px;
-      padding-bottom: 16px;
-      border-bottom: 1px solid var(--border);
-    }}
-    h1 {{
-      font-size: 24px;
-      color: #fff;
-      font-weight: 700;
-      display: flex;
-      align-items: center;
-      gap: 10px;
-    }}
-    .badge {{
-      font-size: 11px;
-      font-weight: 700;
-      padding: 3px 8px;
-      border-radius: 12px;
-      text-transform: uppercase;
-      background: var(--badge-tool);
-      color: #fff;
-    }}
-    .endpoint-info {{
-      display: flex;
-      flex-wrap: wrap;
-      gap: 12px;
-      margin-top: 10px;
-      font-size: 13px;
-      color: var(--text-muted);
-    }}
-    .endpoint-pill {{
-      background: #21262d;
-      padding: 4px 10px;
-      border-radius: 6px;
-      border: 1px solid var(--border);
-      font-family: monospace;
-    }}
-    .card {{
-      background: var(--card-bg);
-      border: 1px solid var(--primary);
-      border-radius: 6px;
-      margin-bottom: 14px;
-      overflow: hidden;
-      transition: border-color 0.15s ease;
-    }}
-    .card-header {{
-      padding: 12px 16px;
-      background: rgba(73, 144, 226, 0.08);
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      cursor: pointer;
-      user-select: none;
-    }}
-    .card-title-group {{
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    }}
-    .tool-method {{
-      background: var(--primary);
-      color: #fff;
-      font-size: 12px;
-      font-weight: 700;
-      padding: 4px 10px;
-      border-radius: 4px;
-      font-family: monospace;
-    }}
-    .tool-name {{
-      font-weight: 600;
-      font-size: 15px;
-      color: #fff;
-      font-family: monospace;
-    }}
-    .tool-desc {{
-      color: var(--text-muted);
-      font-size: 13px;
-      margin-top: 3px;
-    }}
-    .chevron {{
-      transition: transform 0.2s ease;
-      color: var(--primary);
-      font-size: 12px;
-    }}
-    .expanded .chevron {{
-      transform: rotate(180deg);
-    }}
-    .card-body {{
-      display: none;
-      padding: 16px;
-      border-top: 1px solid var(--border);
-      background: #0d1117;
-    }}
-    .expanded .card-body {{
-      display: block;
-    }}
-    .params-table {{
-      width: 100%;
-      border-collapse: collapse;
-      margin-bottom: 16px;
-      font-size: 13px;
-    }}
-    .params-table th, .params-table td {{
-      padding: 8px 12px;
-      text-align: left;
-      border-bottom: 1px solid #21262d;
-    }}
-    .params-table th {{
-      color: var(--text-muted);
-      font-weight: 600;
-    }}
-    .param-name {{
-      font-family: monospace;
-      color: #58a6ff;
-      font-weight: 600;
-    }}
-    .param-type {{
-      font-family: monospace;
-      color: #ff7b72;
-      font-size: 12px;
-    }}
-    .param-req {{
-      color: #f85149;
-      font-size: 11px;
-      font-weight: 600;
-      margin-left: 4px;
-    }}
-    .form-group {{
-      margin-bottom: 12px;
-    }}
-    .form-label {{
-      display: block;
-      font-size: 13px;
-      font-weight: 500;
-      margin-bottom: 6px;
-      color: #fff;
-    }}
-    input[type="text"], input[type="number"], textarea, select {{
-      width: 100%;
-      padding: 8px 12px;
-      background: #161b22;
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      color: #fff;
-      font-family: monospace;
-      font-size: 13px;
-    }}
-    input:focus, textarea:focus {{
-      outline: none;
-      border-color: var(--primary);
-      box-shadow: 0 0 0 2px rgba(73, 144, 226, 0.25);
-    }}
-    textarea {{
-      min-height: 80px;
-      resize: vertical;
-    }}
-    .btn {{
-      padding: 8px 24px;
-      border-radius: 4px;
-      font-weight: 700;
-      font-size: 13px;
-      cursor: pointer;
-      border: none;
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      transition: background 0.15s ease;
-    }}
-    .btn-primary {{
-      background: var(--primary);
-      color: #fff;
-    }}
-    .btn-primary:hover {{
-      background: var(--primary-hover);
-    }}
-    .output-box {{
-      margin-top: 16px;
-      background: var(--code-bg);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 12px;
-      font-family: monospace;
-      font-size: 12px;
-      color: #7ee787;
-      white-space: pre-wrap;
-      word-break: break-all;
-      display: none;
-    }}
-    .output-header {{
-      display: flex;
-      justify-content: space-between;
-      font-size: 11px;
-      font-weight: 700;
-      color: var(--text-muted);
-      margin-bottom: 6px;
-      text-transform: uppercase;
-    }}
-    .status-badge {{
-      background: #238636;
-      color: #fff;
-      padding: 2px 6px;
-      border-radius: 4px;
-      font-size: 11px;
-    }}
-    .output-error {{
-      color: #f85149;
-      border-color: #f85149;
-    }}
-    .output-error .status-badge {{
-      background: #da3633;
-    }}
-    .empty-state {{
-      text-align: center;
-      padding: 48px;
-      color: var(--text-muted);
-    }}
-    .badge-dual {{
-      background: #238636 !important;
-    }}
-    .badge-mcp {{
-      background: #1f6feb !important;
-    }}
-    .quick-connect {{
-      background: var(--card-bg);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      margin-bottom: 24px;
-      overflow: hidden;
-    }}
-    .qc-toggle {{
-      padding: 12px 16px;
-      background: rgba(88, 166, 255, 0.08);
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      cursor: pointer;
-      font-size: 13px;
-      font-weight: 600;
-      color: #58a6ff;
-      user-select: none;
-    }}
-    .qc-toggle:hover {{
-      background: rgba(88, 166, 255, 0.14);
-    }}
-    .qc-body {{
-      display: none;
-      padding: 16px;
-      border-top: 1px solid var(--border);
-      background: #0d1117;
-    }}
-    .qc-grid {{
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 16px;
-    }}
-    @media (max-width: 768px) {{
-      .qc-grid {{ grid-template-columns: 1fr; }}
-    }}
-    .qc-box {{
-      background: var(--code-bg);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 12px;
-      position: relative;
-    }}
-    .qc-box-title {{
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      font-size: 12px;
-      font-weight: 700;
-      margin-bottom: 8px;
-    }}
-    .qc-pre {{
-      margin: 0;
-      font-family: monospace;
-      font-size: 11px;
-      color: #e6edf3;
-      white-space: pre;
-      overflow-x: auto;
-    }}
-    .copy-btn {{
-      background: #21262d;
-      border: 1px solid var(--border);
-      color: #c9d1d9;
-      padding: 3px 8px;
-      border-radius: 4px;
-      font-size: 11px;
-      cursor: pointer;
-    }}
-    .copy-btn:hover {{
-      background: #30363d;
-      color: #fff;
-    }}
-  </style>
-</head>
-<body>
-  <div class="top-nav">
-    <div class="top-nav-brand">
-      <span style="color: #49cc90; font-weight: 700; font-size: 17px;">⚡ FastMCP</span>
-      <span class="top-nav-title">{title}</span>
-      <span style="background: #238636; color: #fff; font-size: 11px; padding: 2px 8px; border-radius: 10px; font-weight: 700;">Offline Mode</span>
-    </div>
-    <div class="top-nav-links">
-      <a href="{docs_path}" style="color: #49cc90; font-weight: 600;">🟢 Official Swagger UI</a>
-      <a href="{ui_path}" style="color: #61affe; font-weight: 700; border-bottom: 2px solid #61affe;">⚡ Offline Explorer</a>
-      <a href="{openapi_path}" target="_blank" style="color: #ff9800;">📄 openapi.json ↗</a>
-      <a href="/docs" target="_blank" style="color: #c9d1d9;">🌐 REST API /docs ↗</a>
-    </div>
-  </div>
 
-  <div class="container">
-    <header>
-      <div>
-        <h1>
-          <span>{title}</span>
-          <span class="badge">FastMCP Explorer</span>
-        </h1>
-        <p style="color: var(--text-muted); margin-top: 6px;">
-          Standalone, zero-CDN Model Context Protocol (MCP) interactive playground.
-        </p>
-        <div class="endpoint-info">
-          <span>Official Swagger: <a href="{docs_path}" style="color: #49cc90; text-decoration: none;">{docs_path}</a></span>
-          <span>OpenAPI Spec: <a href="{openapi_path}" style="color: #ff9800; text-decoration: none;">{openapi_path}</a></span>
-          <span>MCP SSE: <span class="endpoint-pill">{sse_path}</span></span>
-          <span>MCP Streamable: <span class="endpoint-pill">{mcp_path}</span></span>
+@dataclass
+class NavPaths:
+    """Configured navigation paths for documentation and studio views."""
+
+    mcp_path: str = "/mcp"
+    sse_path: str = "/sse"
+    docs_path: str = "/mcp/docs"
+    redoc_path: str = "/mcp/redoc"
+    ui_path: str = "/mcp/ui"
+    rest_docs_url: str = "/docs"
+    rest_redoc_url: str = "/redoc"
+
+
+def _resolve_paths(paths: Optional[NavPaths] = None, **kwargs: Any) -> NavPaths:
+    """Resolves NavPaths from dataclass or fallback kwargs."""
+    if paths is not None:
+        return paths
+    return NavPaths(
+        mcp_path=kwargs.get("mcp_path", "/mcp"),
+        sse_path=kwargs.get("sse_path", "/sse"),
+        docs_path=kwargs.get("docs_path", "/mcp/docs"),
+        redoc_path=kwargs.get("redoc_path", "/mcp/redoc"),
+        ui_path=kwargs.get("ui_path", "/mcp/ui"),
+        rest_docs_url=kwargs.get("rest_docs_url", "/docs"),
+        rest_redoc_url=kwargs.get("rest_redoc_url", "/redoc"),
+    )
+
+
+def render_nav_bar(
+    current_page: str,
+    title: str = "FastAPI-MCP Gateway",
+    paths: Optional[NavPaths] = None,
+    active_openapi_url: Optional[str] = None,
+    **kwargs: Any,
+) -> str:
+    """Generates the unified navigation dock and Quick-Connect client modal HTML."""
+    p = _resolve_paths(paths, **kwargs)
+    active_openapi = active_openapi_url or (
+        f"{p.mcp_path.rstrip('/')}/openapi.json"
+        if "mcp" in current_page
+        else "/openapi.json"
+    )
+
+    rest_sw_active = "active-rest" if current_page == "rest_swagger" else ""
+    rest_rd_active = "active-rest" if current_page == "rest_redoc" else ""
+    mcp_sw_active = "active-mcp" if current_page == "mcp_swagger" else ""
+    mcp_rd_active = "active-mcp" if current_page == "mcp_redoc" else ""
+    mcp_ui_active = "active-studio" if current_page == "mcp_ui" else ""
+
+    nav_html = f"""
+    <div class="fapm-nav-dock">
+      <a href="{p.docs_path}" class="fapm-nav-brand">
+        <span class="fapm-brand-logo">⚡ FastMCP</span>
+        <span class="fapm-brand-title">{title}</span>
+        <span class="fapm-badge-ver">v0.1.1</span>
+      </a>
+
+      <div class="fapm-nav-tabs">
+        <div class="fapm-tab-group">
+          <span class="fapm-group-label">REST API</span>
+          <a href="{p.rest_docs_url}" class="fapm-tab-link {rest_sw_active}">Swagger</a>
+          <a href="{p.rest_redoc_url}" class="fapm-tab-link {rest_rd_active}">ReDoc</a>
+        </div>
+
+        <div class="fapm-tab-group">
+          <span class="fapm-group-label">MCP Server</span>
+          <a href="{p.docs_path}" class="fapm-tab-link {mcp_sw_active}">Swagger</a>
+          <a href="{p.redoc_path}" class="fapm-tab-link {mcp_rd_active}">ReDoc</a>
+          <a href="{p.ui_path}" class="fapm-tab-link {mcp_ui_active}">⚡ Studio</a>
         </div>
       </div>
-    </header>
 
-    <div class="quick-connect">
-      <div class="qc-toggle" onclick="toggleQuickConnect()">
-        <div style="display: flex; align-items: center; gap: 8px;">
-          <span>🔌</span>
-          <span>Connect Local AI Agents (Claude Desktop &amp; Cursor)</span>
-        </div>
-        <span id="qc-chevron" style="font-size: 12px;">▼ Show Config</span>
+      <div class="fapm-nav-actions">
+        <button type="button" class="fapm-btn-connect" onclick="window.fapmToggleModal()">
+          🔌 Connect Client
+        </button>
+        <a href="{active_openapi}" target="_blank" class="fapm-link-spec" title="OpenAPI Spec">
+          📄 openapi.json ↗
+        </a>
       </div>
-      <div id="quick-connect-body" class="qc-body">
-        <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 12px;">
-          Add this server to your local Claude Desktop or Cursor configuration to let AI agents use these tools:
-        </p>
-        <div class="qc-grid">
-          <div class="qc-box">
-            <div class="qc-box-title">
-              <span style="color: #58a6ff;">Claude Desktop (claude_desktop_config.json)</span>
-              <button class="copy-btn" onclick="copySnippet('claude-cfg', this)">📋 Copy</button>
+    </div>
+
+    <div id="fapm-modal-backdrop" class="fapm-modal-backdrop"
+         onclick="if(event.target===this)window.fapmToggleModal()">
+      <div class="fapm-modal-card">
+        <div class="fapm-modal-header">
+          <div class="fapm-modal-title">🔌 Connect MCP Client</div>
+          <button type="button" class="fapm-modal-close"
+                  onclick="window.fapmToggleModal()">✕</button>
+        </div>
+        <div class="fapm-modal-tabs">
+          <button class="fapm-modal-tab-btn active" id="fapm-tbtn-claude"
+                  onclick="window.fapmSelectTab('claude')">Claude Desktop</button>
+          <button class="fapm-modal-tab-btn" id="fapm-tbtn-cursor"
+                  onclick="window.fapmSelectTab('cursor')">Cursor IDE</button>
+          <button class="fapm-modal-tab-btn" id="fapm-tbtn-windsurf"
+                  onclick="window.fapmSelectTab('windsurf')">Windsurf</button>
+          <button class="fapm-modal-tab-btn" id="fapm-tbtn-sse"
+                  onclick="window.fapmSelectTab('sse')">SSE Transport</button>
+        </div>
+        <div class="fapm-modal-body">
+          <div id="fapm-pane-claude" class="fapm-modal-pane active">
+            <div class="fapm-pane-hint">
+              Add this to your <code>claude_desktop_config.json</code>:
             </div>
-            <pre id="claude-cfg" class="qc-pre">&#123;
-  "mcpServers": &#123;
-    "fastapi-mcp": &#123;
-      "url": "http://127.0.0.1:8000{mcp_path}"
-    &#125;
-  &#125;
-&#125;</pre>
+            <div class="fapm-code-box">
+              <pre id="fapm-code-claude"></pre>
+              <button class="fapm-btn-copy"
+                      onclick="window.fapmCopy('fapm-code-claude', this)">📋 Copy</button>
+            </div>
           </div>
-          <div class="qc-box">
-            <div class="qc-box-title">
-              <span style="color: #7ee787;">Cursor IDE (.cursor/mcp.json)</span>
-              <button class="copy-btn" onclick="copySnippet('cursor-cfg', this)">📋 Copy</button>
+          <div id="fapm-pane-cursor" class="fapm-modal-pane">
+            <div class="fapm-pane-hint">
+              Add this to your <code>.cursor/mcp.json</code>:
             </div>
-            <pre id="cursor-cfg" class="qc-pre">&#123;
-  "mcpServers": &#123;
-    "fastapi-mcp": &#123;
-      "url": "http://127.0.0.1:8000{mcp_path}"
-    &#125;
-  &#125;
-&#125;</pre>
+            <div class="fapm-code-box">
+              <pre id="fapm-code-cursor"></pre>
+              <button class="fapm-btn-copy"
+                      onclick="window.fapmCopy('fapm-code-cursor', this)">📋 Copy</button>
+            </div>
+          </div>
+          <div id="fapm-pane-windsurf" class="fapm-modal-pane">
+            <div class="fapm-pane-hint">
+              Add this to your Windsurf <code>mcp_config.json</code>:
+            </div>
+            <div class="fapm-code-box">
+              <pre id="fapm-code-windsurf"></pre>
+              <button class="fapm-btn-copy"
+                      onclick="window.fapmCopy('fapm-code-windsurf', this)">📋 Copy</button>
+            </div>
+          </div>
+          <div id="fapm-pane-sse" class="fapm-modal-pane">
+            <div class="fapm-pane-hint">
+              Legacy SSE transport configuration:
+            </div>
+            <div class="fapm-code-box">
+              <pre id="fapm-code-sse"></pre>
+              <button class="fapm-btn-copy"
+                      onclick="window.fapmCopy('fapm-code-sse', this)">📋 Copy</button>
+            </div>
           </div>
         </div>
       </div>
     </div>
 
-    <div id="tools-container"></div>
-  </div>
+    <script>
+      window.fapmToggleModal = function() {{
+        var el = document.getElementById("fapm-modal-backdrop");
+        if (!el) return;
+        var isHidden = el.style.display === "none" || !el.style.display;
+        el.style.display = isHidden ? "flex" : "none";
+      }};
 
-  <script>
-    const toolsData = {tools_json};
-    const testCallUrl = "{call_url}";
-
-    function toggleQuickConnect() {{
-      const body = document.getElementById("quick-connect-body");
-      const chevron = document.getElementById("qc-chevron");
-      if (body.style.display === "none" || !body.style.display) {{
-        body.style.display = "block";
-        chevron.innerText = "▲ Hide Config";
-      }} else {{
-        body.style.display = "none";
-        chevron.innerText = "▼ Show Config";
-      }}
-    }}
-
-    function copySnippet(elementId, btn) {{
-      const text = document.getElementById(elementId).innerText;
-      navigator.clipboard.writeText(text).then(() => {{
-        const orig = btn.innerText;
-        btn.innerText = "✓ Copied!";
-        setTimeout(() => {{ btn.innerText = orig; }}, 2000);
-      }}).catch(() => {{
-        btn.innerText = "Copy manually";
-      }});
-    }}
-
-    function renderTools() {{
-      const container = document.getElementById("tools-container");
-      if (!toolsData || toolsData.length === 0) {{
-        container.innerHTML = '<div class="empty-state">No MCP tools registered.</div>';
-        return;
-      }}
-
-      container.innerHTML = toolsData.map((tool, idx) => {{
-        const rawProps = tool.input_schema ? tool.input_schema.properties : {{}};
-        const props = rawProps || {{}};
-        const reqs = (tool.input_schema && tool.input_schema.required) || [];
-
-        const paramRows = Object.entries(props).map(([name, schema]) => {{
-          const isReq = reqs.includes(name);
-          const type = schema.type || (schema.$ref ? schema.$ref.split('/').pop() : 'any');
-          const desc = schema.description || '';
-          const def = schema.default !== undefined ? `default: ${schema.default}` : '';
-          return `
-            <tr>
-              <td>
-                <span class="param-name">${name}</span>
-                ${isReq ? '<span class="param-req">*required</span>' : ''}
-              </td>
-              <td><span class="param-type">${type}</span></td>
-              <td>${desc} ${def ? `<span style="color:#8b949e">(${def})</span>` : ''}</td>
-            </tr>
-          `;
-        }}).join('');
-
-        const inputFields = Object.entries(props).map(([name, schema]) => {{
-          const isReq = reqs.includes(name);
-          const type = schema.type || 'string';
-          const placeholder = schema.default !== undefined ? String(schema.default) : (schema.description || name);
-          let inputHtml = '';
-          if (type === 'integer' || type === 'number') {{
-            inputHtml = `<input type="number" id="input-${idx}-${name}" placeholder="${placeholder}" step="any" ${isReq ? 'required' : ''}>`;
-          }} else if (type === 'boolean') {{
-            inputHtml = `
-              <select id="input-${idx}-${name}">
-                <option value="true" ${schema.default === true ? 'selected' : ''}>true</option>
-                <option value="false" ${schema.default === false ? 'selected' : ''}>false</option>
-              </select>
-            `;
-          }} else if (type === 'object' || schema.$ref) {{
-            inputHtml = `<textarea id="input-${idx}-${name}" placeholder='{"key": "value"}'></textarea>`;
-          }} else {{
-            inputHtml = `<input type="text" id="input-${idx}-${name}" placeholder="${placeholder}" ${isReq ? 'required' : ''}>`;
-          }}
-
-          return `
-            <div class="form-group">
-              <label class="form-label">${name} ${isReq ? '<span class="param-req">*</span>' : ''}</label>
-              ${inputHtml}
-            </div>
-          `;
-        }}).join('');
-
-        return `
-          <div class="card" id="card-${idx}">
-            <div class="card-header" onclick="toggleCard(${idx})">
-              <div class="card-title-group">
-                <span class="tool-method ${tool.tool_type === 'REST + MCP' ? 'badge-dual' : 'badge-mcp'}">${tool.tool_type || 'MCP TOOL'}</span>
-                <div>
-                  <div class="tool-name">${tool.name}</div>
-                  <div class="tool-desc">${tool.description || 'No description provided'}</div>
-                </div>
-              </div>
-              <div class="chevron">▼</div>
-            </div>
-            <div class="card-body">
-              <h4 style="margin-bottom: 8px; color: #fff; font-size: 13px;">Parameters</h4>
-              ${Object.keys(props).length > 0 ? `
-                <table class="params-table">
-                  <thead>
-                    <tr><th>Parameter</th><th>Type</th><th>Description</th></tr>
-                  </thead>
-                  <tbody>${paramRows}</tbody>
-                </table>
-              ` : '<p style="color: #8b949e; font-size: 13px; margin-bottom: 16px;">This tool takes no parameters.</p>'}
-
-              <div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid #21262d;">
-                <h4 style="margin-bottom: 12px; color: #fff; font-size: 13px;">Try it out (Execute Live)</h4>
-                <form onsubmit="executeTool(event, ${idx}, '${tool.name}')">
-                  ${inputFields}
-                  <button type="submit" class="btn btn-primary" id="btn-exec-${idx}">
-                    ⚡ Execute Tool
-                  </button>
-                </form>
-                <div class="output-box" id="output-${idx}">
-                  <div class="output-header">
-                    <span>Server Response</span>
-                    <span class="status-badge" id="badge-${idx}">200 OK</span>
-                  </div>
-                  <div id="output-text-${idx}"></div>
-                </div>
-              </div>
-            </div>
-          </div>
-        `;
-      }}).join('');
-    }}
-
-    function toggleCard(idx) {{
-      const card = document.getElementById(`card-${idx}`);
-      card.classList.toggle('expanded');
-    }}
-
-    async function executeTool(event, idx, toolName) {{
-      event.preventDefault();
-      const tool = toolsData[idx];
-      const props = (tool.input_schema && tool.input_schema.properties) || {{}};
-      const args = {{}};
-
-      for (const [name, schema] of Object.entries(props)) {{
-        const el = document.getElementById(`input-${idx}-${name}`);
-        if (!el) continue;
-        const val = el.value.trim();
-        if (val === '') continue;
-
-        const type = schema.type || 'string';
-        if (type === 'integer') {{
-          args[name] = parseInt(val, 10);
-        }} else if (type === 'number') {{
-          args[name] = parseFloat(val);
-        }} else if (type === 'boolean') {{
-          args[name] = val === 'true';
-        }} else if (type === 'object' || schema.$ref) {{
-          try {{
-            args[name] = JSON.parse(val);
-          }} catch (e) {{
-            alert(`Invalid JSON in field '${name}': ${e.message}`);
-            return;
-          }}
-        }} else {{
-          args[name] = val;
-        }}
-      }}
-
-      const outBox = document.getElementById(`output-${idx}`);
-      const outText = document.getElementById(`output-text-${idx}`);
-      const btn = document.getElementById(`btn-exec-${idx}`);
-      const badge = document.getElementById(`badge-${idx}`);
-
-      btn.disabled = true;
-      btn.innerText = "Executing...";
-      outBox.style.display = "block";
-      outBox.classList.remove('output-error');
-      badge.innerText = "Executing...";
-      outText.innerText = "Calling MCP tool in-process...";
-
-      const startTime = performance.now();
-      try {{
-        const resp = await fetch(testCallUrl, {{
-          method: 'POST',
-          headers: {{ 'Content-Type': 'application/json' }},
-          body: JSON.stringify({{ name: toolName, arguments: args }})
+      window.fapmSelectTab = function(name) {{
+        document.querySelectorAll('.fapm-modal-pane').forEach(function(p) {{
+          p.classList.remove('active');
         }});
-        const data = await resp.json();
-        const duration = Math.round(performance.now() - startTime);
-        btn.disabled = false;
-        btn.innerText = "⚡ Execute Tool";
+        document.querySelectorAll('.fapm-modal-tab-btn').forEach(function(b) {{
+          b.classList.remove('active');
+        }});
+        var targetPane = document.getElementById('fapm-pane-' + name);
+        var targetBtn = document.getElementById('fapm-tbtn-' + name);
+        if (targetPane) targetPane.classList.add('active');
+        if (targetBtn) targetBtn.classList.add('active');
+      }};
 
-        if (!resp.ok || data.is_error) {{
-          outBox.classList.add('output-error');
-          badge.innerText = `${resp.status || 400} Error (${duration}ms)`;
-        }} else {{
-          badge.innerText = `200 OK (${duration}ms)`;
-        }}
-        outText.innerText = JSON.stringify(data, null, 2);
-      }} catch (err) {{
-        const duration = Math.round(performance.now() - startTime);
-        btn.disabled = false;
-        btn.innerText = "⚡ Execute Tool";
-        outBox.classList.add('output-error');
-        badge.innerText = `Network Error (${duration}ms)`;
-        outText.innerText = `Error connecting to test runner: ${err.message}`;
-      }}
-    }}
+      window.fapmCopy = function(id, btn) {{
+        var text = document.getElementById(id).innerText;
+        navigator.clipboard.writeText(text).then(function() {{
+          var orig = btn.innerText;
+          btn.innerText = "✓ Copied!";
+          setTimeout(function() {{ btn.innerText = orig; }}, 2000);
+        }}).catch(function() {{
+          btn.innerText = "Copy manually";
+        }});
+      }};
 
-    renderTools();
-  </script>
-</body>
-</html>
-"""
+      document.addEventListener("DOMContentLoaded", function() {{
+        var origin = window.location.origin || "http://127.0.0.1:8000";
+        var mcpUrl = origin + "{p.mcp_path}";
+        var sseUrl = origin + "{p.sse_path}";
+
+        var claudeCfg = JSON.stringify({{
+          mcpServers: {{
+            "fastapi-mcp": {{ "url": mcpUrl }}
+          }}
+        }}, null, 2);
+
+        var cursorCfg = JSON.stringify({{
+          mcpServers: {{
+            "fastapi-mcp": {{ "url": mcpUrl }}
+          }}
+        }}, null, 2);
+
+        var windsurfCfg = JSON.stringify({{
+          mcpServers: {{
+            "fastapi-mcp": {{ "serverUrl": mcpUrl }}
+          }}
+        }}, null, 2);
+
+        var sseCfg = JSON.stringify({{
+          mcpServers: {{
+            "fastapi-mcp-sse": {{ "url": sseUrl }}
+          }}
+        }}, null, 2);
+
+        var elC = document.getElementById("fapm-code-claude");
+        if (elC) elC.innerText = claudeCfg;
+        var elCu = document.getElementById("fapm-code-cursor");
+        if (elCu) elCu.innerText = cursorCfg;
+        var elW = document.getElementById("fapm-code-windsurf");
+        if (elW) elW.innerText = windsurfCfg;
+        var elS = document.getElementById("fapm-code-sse");
+        if (elS) elS.innerText = sseCfg;
+      }});
+    </script>
+    """
+    return nav_html
+
+
+def inject_nav_bar_into_html(
+    html: str,
+    current_page: str,
+    title: str = "FastAPI-MCP Gateway",
+    paths: Optional[NavPaths] = None,
+    active_openapi_url: Optional[str] = None,
+    **kwargs: Any,
+) -> str:
+    """Injects the unified navigation dock into an existing HTML document."""
+    p = _resolve_paths(paths, **kwargs)
+    nav_html = render_nav_bar(
+        current_page=current_page,
+        title=title,
+        paths=p,
+        active_openapi_url=active_openapi_url,
+    )
+
+    offset_style = "<style>body { padding-top: 42px !important; margin: 0; }</style>"
+    payload = f"{NAV_CSS}\n{offset_style}\n{nav_html}"
+
+    if "<body" in html:
+        idx = html.find(">", html.find("<body"))
+        if idx != -1:
+            return html[: idx + 1] + payload + html[idx + 1 :]
+    return payload + html
 
 
 def _extract_tool_schema_and_meta(tool: Any) -> Tuple[str, str, Dict[str, Any]]:
@@ -683,7 +288,7 @@ def _extract_tool_schema_and_meta(tool: Any) -> Tuple[str, str, Dict[str, Any]]:
 
 
 def _inline_defs(schema: Any, defs: Dict[str, Any]) -> Any:
-    """Recursively resolves and inlines $ref pointers from $defs to eliminate resolver errors."""
+    """Recursively resolves and inlines $ref pointers from $defs."""
     if isinstance(schema, dict):
         if "$ref" in schema and isinstance(schema["$ref"], str):
             ref = schema["$ref"]
@@ -733,18 +338,7 @@ def generate_mcp_openapi_spec(
     version: str = "1.0.0",
     catalog: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """Generates an OpenAPI 3.1 specification for registered MCP tools.
-
-    Args:
-        title: Title of the API documentation.
-        tools: List of Tool objects or tool dictionaries.
-        mcp_path: Base mount path for the MCP endpoints.
-        version: API version string.
-        catalog: Optional internal tool catalog to extract route tags and metadata.
-
-    Returns:
-        A dictionary compliant with OpenAPI 3.1 schema.
-    """
+    """Generates an OpenAPI 3.1 specification for registered MCP tools."""
     catalog = catalog or {}
     paths: Dict[str, Any] = {}
     global_defs: Dict[str, Any] = {}
@@ -758,7 +352,6 @@ def generate_mcp_openapi_spec(
         schema_dict = _inline_defs(raw_schema, {**global_defs, **tool_defs})
         tool_endpoint = f"{mcp_path.rstrip('/')}/tools/{name}"
 
-        # Extract tags from catalog if available
         tags = ["MCP Tools"]
         if name in catalog:
             _, _, runner = catalog[name]
@@ -847,13 +440,12 @@ def get_official_swagger_ui_html(
     title: str,
     openapi_url: str,
     spec: Dict[str, Any],
-    mcp_path: str = "/mcp",
-    sse_path: str = "/sse",
-    ui_path: str = "/mcp/ui",
+    paths: Optional[NavPaths] = None,
     catalog: Optional[Dict[str, Any]] = None,
+    **kwargs: Any,
 ) -> str:
-    """Renders the official Swagger UI embedding the generated OpenAPI specification."""
-    del mcp_path, sse_path, catalog
+    """Renders official Swagger UI with the unified navigation dock."""
+    del catalog
     swagger_ui_params = {
         "spec": spec,
         "deepLinking": True,
@@ -866,42 +458,40 @@ def get_official_swagger_ui_html(
         swagger_ui_parameters=swagger_ui_params,
     )
     raw_html = resp.body.decode()
+    p = _resolve_paths(paths, **kwargs)
 
-    docs_url = openapi_url.replace("/openapi.json", "/docs")
-    font_stack = (
-        "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
+    return inject_nav_bar_into_html(
+        html=raw_html,
+        current_page="mcp_swagger",
+        title=title.replace(" - MCP Swagger Explorer", ""),
+        paths=p,
+        active_openapi_url=openapi_url,
     )
-    nav_bar = (
-        '<div style="background:#1b1b1b; padding: 12px 24px; display: flex; '
-        'justify-content: space-between; align-items: center; border-bottom: 2px solid #49cc90; '
-        f'font-family: {font_stack};">\n'
-        '  <div style="display: flex; align-items: center; gap: 12px;">\n'
-        '    <span style="color: #49cc90; font-weight: 700; font-size: 17px; '
-        'letter-spacing: -0.5px;">⚡ FastMCP</span>\n'
-        f'    <span style="color: #ffffff; font-size: 14px; font-weight: 600;">{title}</span>\n'
-        '    <span style="background: #238636; color: #ffffff; font-size: 11px; '
-        'padding: 2px 8px; border-radius: 10px; font-weight: 700;">OAS 3.1</span>\n'
-        '  </div>\n'
-        '  <div style="display: flex; gap: 16px; font-size: 13px; font-weight: 500;">\n'
-        f'    <a href="{docs_url}" style="color: #49cc90; text-decoration: none; '
-        'font-weight: 700; border-bottom: 2px solid #49cc90; padding-bottom: 2px;">'
-        '🟢 Official Swagger UI</a>\n'
-        f'    <a href="{ui_path}" style="color: #61affe; text-decoration: none; '
-        'padding-bottom: 2px;">⚡ Offline Explorer</a>\n'
-        f'    <a href="{openapi_url}" target="_blank" style="color: #ff9800; '
-        'text-decoration: none; padding-bottom: 2px;">📄 openapi.json ↗</a>\n'
-        '    <a href="/docs" target="_blank" style="color: #c9d1d9; text-decoration: none; '
-        'padding-bottom: 2px;">🌐 REST API /docs ↗</a>\n'
-        '    <a href="javascript:void(0)" onclick="alert(\'Claude Desktop & Cursor Config:\\n\\n'
-        '{\\n  \\\"mcpServers\\\": {\\n    \\\"fastapi-mcp\\\": {\\n      '
-        '\\\"url\\\": \\\"http://127.0.0.1:8000/mcp\\\"\\n    }\\n  }\\n}\')" '
-        'style="color: #58a6ff; text-decoration: none; padding-bottom: 2px;">🔌 Connect Client</a>\n'
-        '  </div>\n'
-        '</div>'
+
+
+def get_official_redoc_html(
+    title: str,
+    openapi_url: str,
+    paths: Optional[NavPaths] = None,
+    catalog: Optional[Dict[str, Any]] = None,
+    **kwargs: Any,
+) -> str:
+    """Renders official ReDoc UI with the unified navigation dock."""
+    del catalog
+    resp = get_redoc_html(
+        openapi_url=openapi_url,
+        title=title,
     )
-    if '<div id="swagger-ui">' in raw_html:
-        return raw_html.replace('<div id="swagger-ui">', f'{nav_bar}\n<div id="swagger-ui">')
-    return raw_html
+    raw_html = resp.body.decode()
+    p = _resolve_paths(paths, **kwargs)
+
+    return inject_nav_bar_into_html(
+        html=raw_html,
+        current_page="mcp_redoc",
+        title=title.replace(" - MCP ReDoc", ""),
+        paths=p,
+        active_openapi_url=openapi_url,
+    )
 
 
 def _serialize_tool_for_ui(
@@ -962,23 +552,26 @@ def _serialize_tool_for_ui(
 def get_mcp_swagger_html(
     title: str,
     tools: list,
-    mcp_path: str = "/mcp",
-    sse_path: str = "/sse",
     call_url: str = "/mcp/ui/call",
-    docs_path: str = "/mcp/docs",
-    openapi_path: str = "/mcp/openapi.json",
-    ui_path: str = "/mcp/ui",
+    paths: Optional[NavPaths] = None,
+    openapi_path: Optional[str] = None,
     catalog: Optional[Dict[str, Any]] = None,
+    **kwargs: Any,
 ) -> str:
-    """Renders the standalone offline Swagger-inspired MCP HTML page."""
+    """Renders the standalone FastAPI-MCP Studio with two-column developer workbench."""
+    p = _resolve_paths(paths, **kwargs)
     tools_json = json.dumps([_serialize_tool_for_ui(t, catalog=catalog) for t in tools])
+    spec_url = openapi_path or f"{p.mcp_path.rstrip('/')}/openapi.json"
+    nav_html = render_nav_bar(
+        current_page="mcp_ui",
+        title=title,
+        paths=p,
+        active_openapi_url=spec_url,
+    )
     return (
-        OFFLINE_HTML_TEMPLATE.replace("{title}", title)
+        STUDIO_HTML_TEMPLATE.replace("{title}", title)
+        .replace("{nav_css}", NAV_CSS)
+        .replace("{nav_html}", nav_html)
         .replace("{tools_json}", tools_json)
-        .replace("{mcp_path}", mcp_path)
-        .replace("{sse_path}", sse_path)
         .replace("{call_url}", call_url)
-        .replace("{docs_path}", docs_path)
-        .replace("{openapi_path}", openapi_path)
-        .replace("{ui_path}", ui_path)
     )
