@@ -1,10 +1,8 @@
-"""Interactive documentation and developer studio for FastAPI-MCP.
+"""Interactive developer studio and unified documentation navigation for FastAPI-MCP.
 
 Provides:
-- `/mcp/docs`: Official Swagger UI for MCP tools with unified navigation
-- `/mcp/redoc`: Official ReDoc UI for MCP tools with unified navigation
-- `/mcp/ui`: Standalone, zero-dependency Developer Studio with two-column layout
-- Unified navigation dock bridging REST (/docs, /redoc) and MCP documentation
+- `/mcp/ui`: FastAPI-MCP Studio supporting Tools, Resources, Prompts, and Client Configs
+- Unified navigation dock connecting REST (/docs, /redoc) and MCP Studio (/mcp/ui)
 """
 
 import copy
@@ -51,22 +49,17 @@ def render_nav_bar(
     **kwargs: Any,
 ) -> str:
     """Generates the unified navigation dock and Quick-Connect client modal HTML."""
+    del active_openapi_url
     p = _resolve_paths(paths, **kwargs)
-    active_openapi = active_openapi_url or (
-        f"{p.mcp_path.rstrip('/')}/openapi.json"
-        if "mcp" in current_page
-        else "/openapi.json"
-    )
 
     rest_sw_active = "active-rest" if current_page == "rest_swagger" else ""
     rest_rd_active = "active-rest" if current_page == "rest_redoc" else ""
-    mcp_sw_active = "active-mcp" if current_page == "mcp_swagger" else ""
-    mcp_rd_active = "active-mcp" if current_page == "mcp_redoc" else ""
-    mcp_ui_active = "active-studio" if current_page == "mcp_ui" else ""
+    is_mcp = current_page in ("mcp_ui", "mcp_swagger", "mcp_redoc")
+    mcp_ui_active = "active-studio" if is_mcp else ""
 
     nav_html = f"""
     <div class="fapm-nav-dock">
-      <a href="{p.docs_path}" class="fapm-nav-brand">
+      <a href="{p.ui_path}" class="fapm-nav-brand">
         <span class="fapm-brand-logo">⚡ FastMCP</span>
         <span class="fapm-brand-title">{title}</span>
         <span class="fapm-badge-ver">v0.1.1</span>
@@ -80,10 +73,8 @@ def render_nav_bar(
         </div>
 
         <div class="fapm-tab-group">
-          <span class="fapm-group-label">MCP Server</span>
-          <a href="{p.docs_path}" class="fapm-tab-link {mcp_sw_active}">Swagger</a>
-          <a href="{p.redoc_path}" class="fapm-tab-link {mcp_rd_active}">ReDoc</a>
-          <a href="{p.ui_path}" class="fapm-tab-link {mcp_ui_active}">⚡ Studio</a>
+          <span class="fapm-group-label">MCP</span>
+          <a href="{p.ui_path}" class="fapm-tab-link {mcp_ui_active}">🤖 MCP Studio</a>
         </div>
       </div>
 
@@ -91,9 +82,6 @@ def render_nav_bar(
         <button type="button" class="fapm-btn-connect" onclick="window.fapmToggleModal()">
           🔌 Connect Client
         </button>
-        <a href="{active_openapi}" target="_blank" class="fapm-link-spec" title="OpenAPI Spec">
-          📄 openapi.json ↗
-        </a>
       </div>
     </div>
 
@@ -426,8 +414,7 @@ def generate_mcp_openapi_spec(
             "title": f"{title} - MCP Swagger Explorer",
             "version": version,
             "description": (
-                "Interactive OpenAPI 3.1 documentation for Model Context Protocol (MCP) Tools. "
-                "Execute tools directly via Swagger UI or inspect schemas."
+                "OpenAPI 3.1 schema for registered Model Context Protocol (MCP) Tools."
             ),
         },
         "paths": paths,
@@ -444,7 +431,7 @@ def get_official_swagger_ui_html(
     catalog: Optional[Dict[str, Any]] = None,
     **kwargs: Any,
 ) -> str:
-    """Renders official Swagger UI with the unified navigation dock."""
+    """Renders Swagger UI for backward-compatibility with tests and legacy callers."""
     del catalog
     swagger_ui_params = {
         "spec": spec,
@@ -476,7 +463,7 @@ def get_official_redoc_html(
     catalog: Optional[Dict[str, Any]] = None,
     **kwargs: Any,
 ) -> str:
-    """Renders official ReDoc UI with the unified navigation dock."""
+    """Renders ReDoc UI for backward-compatibility with tests and legacy callers."""
     del catalog
     resp = get_redoc_html(
         openapi_url=openapi_url,
@@ -549,29 +536,63 @@ def _serialize_tool_for_ui(
     }
 
 
+def _serialize_resource_for_ui(res: Any) -> Dict[str, Any]:
+    """Serializes an MCP Resource object into a JSON dictionary."""
+    return {
+        "name": getattr(res, "name", "") or str(getattr(res, "uri", "")),
+        "uri": str(getattr(res, "uri", "")),
+        "description": getattr(res, "description", "") or "",
+        "mime_type": getattr(res, "mime_type", "text/plain") or "text/plain",
+    }
+
+
+def _serialize_prompt_for_ui(p: Any) -> Dict[str, Any]:
+    """Serializes an MCP Prompt object into a JSON dictionary."""
+    args = []
+    for a in getattr(p, "arguments", []) or []:
+        args.append({
+            "name": getattr(a, "name", ""),
+            "description": getattr(a, "description", "") or "",
+            "required": bool(getattr(a, "required", False)),
+        })
+    return {
+        "name": getattr(p, "name", ""),
+        "description": getattr(p, "description", "") or "",
+        "arguments": args,
+    }
+
+
 def get_mcp_swagger_html(
     title: str,
     tools: list,
+    resources: Optional[list] = None,
+    prompts: Optional[list] = None,
     call_url: str = "/mcp/ui/call",
+    resource_url: str = "/mcp/ui/resource",
+    prompt_url: str = "/mcp/ui/prompt",
     paths: Optional[NavPaths] = None,
-    openapi_path: Optional[str] = None,
     catalog: Optional[Dict[str, Any]] = None,
     **kwargs: Any,
 ) -> str:
-    """Renders the standalone FastAPI-MCP Studio with two-column developer workbench."""
+    """Renders the standalone FastAPI-MCP Studio supporting Tools, Resources, and Prompts."""
     p = _resolve_paths(paths, **kwargs)
     tools_json = json.dumps([_serialize_tool_for_ui(t, catalog=catalog) for t in tools])
-    spec_url = openapi_path or f"{p.mcp_path.rstrip('/')}/openapi.json"
+    resources_json = json.dumps([_serialize_resource_for_ui(r) for r in (resources or [])])
+    prompts_json = json.dumps([_serialize_prompt_for_ui(pr) for pr in (prompts or [])])
+
     nav_html = render_nav_bar(
         current_page="mcp_ui",
         title=title,
         paths=p,
-        active_openapi_url=spec_url,
     )
     return (
         STUDIO_HTML_TEMPLATE.replace("{title}", title)
         .replace("{nav_css}", NAV_CSS)
         .replace("{nav_html}", nav_html)
         .replace("{tools_json}", tools_json)
+        .replace("{resources_json}", resources_json)
+        .replace("{prompts_json}", prompts_json)
         .replace("{call_url}", call_url)
+        .replace("{resource_url}", resource_url)
+        .replace("{prompt_url}", prompt_url)
     )

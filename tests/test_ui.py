@@ -8,6 +8,8 @@ from fastapi_mcp.ui import (
     _build_tool_example,
     _extract_tool_schema_and_meta,
     _inline_defs,
+    _serialize_prompt_for_ui,
+    _serialize_resource_for_ui,
     _serialize_tool_for_ui,
     generate_mcp_openapi_spec,
     get_mcp_swagger_html,
@@ -270,6 +272,125 @@ def test_ui_generators_edge_branches():
 
 
 
+
+
+def test_mcp_studio_resources_and_prompts():
+    """Test MCP Studio Resources, Prompts, and their interactive UI endpoints."""
+    app = FastAPIMCP(title="StudioStudioDemo", mcp_name="StudioDemo")
+
+    @app.tool(name="add_nums")
+    def add_nums(a: int, b: int) -> int:
+        """Add two integers."""
+        return a + b
+
+    @app.resource("system://health")
+    def get_health() -> str:
+        """System health status."""
+        return '{"status": "healthy", "uptime": 1000}'
+
+    @app.prompt("debug_helper")
+    def debug_helper(error_log: str, language: str = "python") -> str:
+        """Helper to debug code errors."""
+        return f"Help me debug this {language} error:\n{error_log}"
+
+    app.mount_mcp()
+
+    async def run_checks():
+        # 1. Direct Python SDK Methods
+        resources = await app.list_resources()
+        assert len(resources) >= 1
+        assert any(r.uri == "system://health" for r in resources)
+
+        res_read = await app.read_resource("system://health")
+        assert len(res_read) >= 1
+
+        prompts = await app.list_prompts()
+        assert len(prompts) >= 1
+        assert any(p.name == "debug_helper" for p in prompts)
+
+        p_res = await app.get_prompt(
+            "debug_helper", {"error_log": "NullPointer", "language": "java"}
+        )
+        assert p_res is not None
+
+        # 2. HTTP UI Client Tests
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            # Studio page renders all 3 primitives
+            res_ui = await client.get("/mcp/ui")
+            assert res_ui.status_code == 200
+            assert "add_nums" in res_ui.text
+            assert "system://health" in res_ui.text
+            assert "debug_helper" in res_ui.text
+
+            # Live resource read endpoint
+            res_live = await client.get("/mcp/ui/resource?uri=system%3A%2F%2Fhealth")
+            assert res_live.status_code == 200
+            data_res = res_live.json()
+            assert data_res["success"] is True
+            assert "healthy" in data_res["contents"][0]["content"]
+
+            # Error reading non-existent resource
+            res_err = await client.get("/mcp/ui/resource?uri=nonexistent%3A%2F%2Fpath")
+            assert res_err.status_code == 400
+            assert res_err.json()["is_error"] is True
+
+            # Live prompt render endpoint
+            res_prompt = await client.post(
+                "/mcp/ui/prompt",
+                json={
+                    "name": "debug_helper",
+                    "arguments": {"error_log": "SyntaxError", "language": "python"},
+                },
+            )
+            assert res_prompt.status_code == 200
+            data_prompt = res_prompt.json()
+            assert data_prompt["success"] is True
+            assert len(data_prompt["messages"]) >= 1
+            assert "SyntaxError" in data_prompt["messages"][0]["text"]
+
+            # Error rendering non-existent prompt
+            p_err = await client.post(
+                "/mcp/ui/prompt",
+                json={"name": "nonexistent_prompt", "arguments": {}},
+            )
+            assert p_err.status_code == 400
+            assert p_err.json()["is_error"] is True
+
+    asyncio.run(run_checks())
+
+    # Serialization helper tests
+    class MockRes:
+        """Mock Resource for UI serialization."""
+        name = "mock_r"
+        uri = "mock://res"
+        description = "Mock desc"
+        mime_type = "application/json"
+
+    s_res = _serialize_resource_for_ui(MockRes())
+    assert s_res["name"] == "mock_r"
+    assert s_res["uri"] == "mock://res"
+    assert s_res["mime_type"] == "application/json"
+
+    class MockArg:
+        """Mock Argument for prompt."""
+        name = "query"
+        description = "search query"
+        required = True
+
+    class MockPrompt:
+        """Mock Prompt for UI serialization."""
+        name = "mock_p"
+        description = "Mock prompt desc"
+        arguments = [MockArg()]
+
+    s_p = _serialize_prompt_for_ui(MockPrompt())
+    assert s_p["name"] == "mock_p"
+    assert s_p["arguments"][0]["name"] == "query"
+    assert s_p["arguments"][0]["required"] is True
+
+
 if __name__ == "__main__":
     test_mcp_swagger_ui()
     test_ui_generators_edge_branches()
+    test_mcp_studio_resources_and_prompts()
