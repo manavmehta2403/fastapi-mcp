@@ -17,9 +17,10 @@
 ## 🌟 Key Highlights
 
 * 🤝 **True Protocol Coexistence**: Serve your REST API (OpenAPI/Swagger docs), MCP Server-Sent Events (SSE), and Streamable HTTP endpoints from a **single Uvicorn process and single port**.
-* 🛠️ **Dual `@app.api_tool` Decorator**: Define an endpoint once — it instantly becomes both an HTTP REST endpoint for web clients and an MCP tool for AI agents (Claude, Cursor, Antigravity).
+* 🛠️ **Dual `@app.api_tool` Decorator**: Define an endpoint once — it instantly becomes both an HTTP REST endpoint for web clients and an MCP tool for AI agents (Claude, Cursor, Windsurf).
+* 🤖 **FastAPI-MCP Studio (`/mcp/ui`)**: Full-featured developer studio covering all 3 MCP primitives (**Tools**, **Resources**, and **Prompts**) with visual testing, execution latency timers, and 1-click executable code snippets (Python FastMCP, cURL JSON-RPC 2.0, TypeScript SDK).
+* 🌐 **Unified Navigation Dock**: Bridges FastAPI REST documentation (`/docs`, `/redoc`) and MCP Developer Studio (`/mcp/ui`) with seamless, zero-breaking-change navigation and a 1-click **Client Connect Modal** (Claude, Cursor, Windsurf).
 * 🔄 **2-Line Existing App Conversion**: Point to any existing FastAPI application and automatically expose its endpoints as MCP tools with zero changes to your existing code.
-* 📖 **Built-in MCP Swagger Explorer (`/mcp/docs`)**: An interactive visual playground for testing MCP tools right alongside FastAPI's `/docs`. Inspect parameters and execute tools live with "Try it out" in your browser.
 * ⚡ **Zero-Network In-Memory Dispatch**: In-memory ASGI transport executes tool calls directly without TCP socket loopbacks, preserving FastAPI `Depends()` injections, auth, and Pydantic validation.
 
 ---
@@ -199,9 +200,11 @@ uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
 Available endpoints on port 8000:
-* **FastAPI Swagger UI**: `http://localhost:8000/docs`
-* **MCP Swagger Explorer**: `http://localhost:8000/mcp/docs`
-* **MCP Streamable HTTP**: `http://localhost:8000/mcp`
+* **FastAPI REST Swagger UI**: `http://localhost:8000/docs`
+* **FastAPI REST ReDoc**: `http://localhost:8000/redoc`
+* **FastAPI-MCP Developer Studio**: `http://localhost:8000/mcp/ui`
+* **MCP OpenAPI 3.1 Specification**: `http://localhost:8000/mcp/openapi.json`
+* **MCP Streamable HTTP Transport**: `http://localhost:8000/mcp`
 * **MCP Server-Sent Events (SSE)**: `http://localhost:8000/sse`
 
 ---
@@ -229,23 +232,24 @@ if __name__ == "__main__":
 
 ---
 
-## 📖 Dual-Engine MCP Swagger Explorer (`/mcp/docs` & `/mcp/ui`)
+## 🤖 FastAPI-MCP Studio (`/mcp/ui`) & Unified Navigation
 
-FastAPI-MCP provides a seamless, hybrid documentation experience for your Model Context Protocol tools:
+FastAPI-MCP v0.2.0 introduces a dedicated, world-class developer studio that unifies REST documentation and the Model Context Protocol ecosystem:
 
-1. **Official Swagger UI (`/mcp/docs`)**:
-   - The literal, official Swagger UI powered by OpenAPI 3.1.
-   - Built-in `curl` command generator, request schema validation, and "Try it out" live execution directly into `/mcp/tools/{tool_name}`.
-   - Groups tools cleanly by route tags or under `MCP Tools`.
+### 1. The 3 MCP Primitives in One Workbench
+- 🛠️ **Tools (`@app.api_tool()`, `@app.tool()`)**: Dynamic schema parameter forms, live in-memory execution, latency timing (e.g. `200 OK (34ms)`), formatted output viewer, and 1-click executable client snippets (**Python FastMCP Client**, **cURL JSON-RPC 2.0**, and **TypeScript SDK**).
+- 📦 **Resources (`@app.resource()`)**: Explore URI schemes (e.g. `company://config`), inspect MIME types, and read live payloads with 1-click execution.
+- 💬 **Prompts (`@app.prompt()`)**: Preview prompt templates, supply test arguments, and inspect rendered user/system messages in real time.
 
-2. **100% Offline Standalone Explorer (`/mcp/ui`)**:
-   - Zero-CDN, air-gapped standalone HTML/CSS/JS explorer.
-   - Styled pixel-for-pixel to match Swagger UI's iconic design and buttons.
-   - Connects directly to in-process execution via `/mcp/ui/call`.
+### 2. Unified Navigation Dock
+A persistent, blurred top navigation bar bridges your entire stack:
+- **REST API Group**: 1-click access to FastAPI Swagger (`/docs`) and ReDoc (`/redoc`).
+- **MCP Group**: Direct link to the MCP Studio (`/mcp/ui`).
+- **🔌 Connect Client Modal**: Ready-to-copy configuration JSON snippets for **Claude Desktop** (`claude_desktop_config.json`), **Cursor IDE** (`.cursor/mcp.json`), **Windsurf** (`mcp_config.json`), and legacy **SSE Transport**.
 
-3. **Dynamic MCP OpenAPI 3.1 Specification (`/mcp/openapi.json`)**:
-   - Machine-readable OpenAPI 3.1 contract of all your MCP tools.
-   - Ready for import into Postman, Insomnia, or client SDK generators.
+### 3. OpenAPI 3.1 Spec & Schema Export
+- Export the complete machine-readable OpenAPI 3.1 specification at `/mcp/openapi.json`.
+- 1-click **Copy Tool Schema** buttons to copy exact Pydantic/OpenAPI JSON schemas directly into AI prompts, LangChain, or agentic frameworks.
 
 ---
 

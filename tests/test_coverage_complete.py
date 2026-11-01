@@ -545,7 +545,7 @@ async def test_version_and_http_query_decorator():
     """Test __version__ and @app.query decorator for RFC 10008 HTTP QUERY method."""
     import fastapi_mcp
 
-    assert fastapi_mcp.__version__.startswith("0.1.")
+    assert fastapi_mcp.__version__ == "0.2.0"
 
     app = FastAPIMCP(auto_scan=True)
 

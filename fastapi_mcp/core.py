@@ -514,6 +514,7 @@ class FastAPIMCP(FastAPI):
                 call_url=call_path,
                 resource_url=resource_path,
                 prompt_url=prompt_path,
+                openapi_url=openapi_path,
                 paths=paths,
                 catalog=self._tool_catalog,
             )
