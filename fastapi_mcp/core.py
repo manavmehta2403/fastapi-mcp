@@ -16,10 +16,15 @@ from fastapi import FastAPI
 from fastapi.routing import APIRoute
 from mcp.server.mcpserver import MCPServer
 from pydantic import BaseModel
-from starlette.responses import HTMLResponse
+from starlette.requests import Request
+from starlette.responses import HTMLResponse, JSONResponse
 
 from .scanner import RouteScanner, sanitize_tool_name
-from .ui import get_mcp_swagger_html
+from .ui import (
+    generate_mcp_openapi_spec,
+    get_mcp_swagger_html,
+    get_official_swagger_ui_html,
+)
 
 
 class ToolCallRequest(BaseModel):
@@ -417,11 +422,43 @@ class FastAPIMCP(FastAPI):
         """Registers the interactive MCP Swagger UI at {mcp_path}/docs and {mcp_path}/ui."""
         docs_path = f"{mcp_path.rstrip('/')}/docs"
         ui_path = f"{mcp_path.rstrip('/')}/ui"
+        openapi_path = f"{mcp_path.rstrip('/')}/openapi.json"
         call_path = f"{mcp_path.rstrip('/')}/ui/call"
+        tools_pattern = f"{mcp_path.rstrip('/')}/tools/{{tool_name}}"
+
+        @target_app.get(openapi_path, include_in_schema=False)
+        async def mcp_openapi_spec():
+            tools = await self.list_tools()
+            title = self.mcp_name + (" [Librarian Active]" if self.librarian else "")
+            return generate_mcp_openapi_spec(
+                title=title,
+                tools=tools,
+                mcp_path=mcp_path,
+                catalog=self._tool_catalog,
+            )
 
         @target_app.get(docs_path, response_class=HTMLResponse, include_in_schema=False)
+        async def mcp_official_swagger():
+            tools = await self.list_tools()
+            title = self.mcp_name + (" [Librarian Active]" if self.librarian else "")
+            spec = generate_mcp_openapi_spec(
+                title=title,
+                tools=tools,
+                mcp_path=mcp_path,
+                catalog=self._tool_catalog,
+            )
+            html = get_official_swagger_ui_html(
+                title=f"{title} - MCP Swagger Explorer",
+                openapi_url=openapi_path,
+                spec=spec,
+                mcp_path=mcp_path,
+                sse_path=sse_path,
+                ui_path=ui_path,
+            )
+            return HTMLResponse(html)
+
         @target_app.get(ui_path, response_class=HTMLResponse, include_in_schema=False)
-        async def mcp_swagger_docs():
+        async def mcp_offline_ui():
             tools = await self.list_tools()
             title = self.mcp_name + (" [Librarian Active]" if self.librarian else "")
             html = get_mcp_swagger_html(
@@ -430,14 +467,46 @@ class FastAPIMCP(FastAPI):
                 mcp_path=mcp_path,
                 sse_path=sse_path,
                 call_url=call_path,
+                docs_path=docs_path,
+                openapi_path=openapi_path,
+                ui_path=ui_path,
             )
             return HTMLResponse(html)
+
+        @target_app.post(tools_pattern, include_in_schema=False)
+        async def mcp_tool_direct_call(tool_name: str, request: Request):
+            body: Dict[str, Any] = {}
+            if request.headers.get("content-type", "").startswith("application/json"):
+                try:
+                    parsed = await request.json()
+                    if isinstance(parsed, dict):
+                        body = parsed
+                except Exception:  # pylint: disable=broad-exception-caught
+                    pass
+            try:
+                res = await self.call_tool(tool_name, body)
+                output_texts = [
+                    c.text for c in getattr(res, "content", []) if hasattr(c, "text")
+                ]
+                output_str = "\n".join(output_texts) if output_texts else str(res)
+                try:
+                    parsed_json = json.loads(output_str)
+                    return {"success": True, "result": parsed_json}
+                except Exception:  # pylint: disable=broad-exception-caught
+                    return {"success": True, "result": output_str}
+            except Exception as e:  # pylint: disable=broad-exception-caught
+                return JSONResponse(
+                    status_code=400,
+                    content={"is_error": True, "error": str(e)},
+                )
 
         @target_app.post(call_path, include_in_schema=False)
         async def mcp_ui_call(req: ToolCallRequest):
             try:
                 res = await self.call_tool(req.name, req.arguments)
-                output_texts = [c.text for c in getattr(res, "content", []) if hasattr(c, "text")]
+                output_texts = [
+                    c.text for c in getattr(res, "content", []) if hasattr(c, "text")
+                ]
                 output_str = "\n".join(output_texts) if output_texts else str(res)
                 try:
                     parsed_json = json.loads(output_str)
