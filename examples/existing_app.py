@@ -176,7 +176,10 @@ if __name__ == "__main__":
     else:
         import uvicorn
         print("Starting unified server on http://localhost:8000")
-        print("  - REST Swagger UI:   http://localhost:8000/docs")
-        print("  - MCP Streamable:    http://localhost:8000/mcp")
-        print("  - MCP SSE Stream:    http://localhost:8000/sse")
+        print("  - REST Swagger UI:      http://localhost:8000/docs")
+        print("  - Official MCP Swagger: http://localhost:8000/mcp/docs")
+        print("  - Offline MCP UI:       http://localhost:8000/mcp/ui")
+        print("  - MCP OpenAPI Spec:     http://localhost:8000/mcp/openapi.json")
+        print("  - MCP Streamable:       http://localhost:8000/mcp")
+        print("  - MCP SSE Stream:       http://localhost:8000/sse")
         uvicorn.run(app, host="127.0.0.1", port=8000)
