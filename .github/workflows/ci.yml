@@ -35,6 +35,6 @@ jobs:
         run: |
           pytest tests/ -v --cov=fastapi_mcp --cov-report=term-missing --cov-fail-under=96
 
-      - name: Run Pylint Quality Gate (>=9.5/10)
+      - name: Run Pylint Quality Gate (>=9.6/10)
         run: |
-          pylint fastapi_mcp --fail-under=9.5
+          pylint fastapi_mcp --fail-under=9.6
