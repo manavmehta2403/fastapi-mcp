@@ -7,7 +7,25 @@ or build unified APIs where REST endpoints and MCP tools coexist effortlessly.
 from .core import FastAPIMCP
 from .scanner import RouteScanner
 from .dispatcher import ASGIDispatcher
+from .gateway import (
+    GatewayMode,
+    AuthMode,
+    AuthContext,
+    BaseGatewayAdapter,
+    DefaultGateway,
+    create_gateway_subapp,
+)
 
-__version__ = "0.2.0"
+__version__ = "0.10.0"
 
-__all__ = ["FastAPIMCP", "RouteScanner", "ASGIDispatcher"]
+__all__ = [
+    "FastAPIMCP",
+    "RouteScanner",
+    "ASGIDispatcher",
+    "GatewayMode",
+    "AuthMode",
+    "AuthContext",
+    "BaseGatewayAdapter",
+    "DefaultGateway",
+    "create_gateway_subapp",
+]
