@@ -45,7 +45,7 @@ from .webrtc import (
     WebRTCManager,
 )
 
-__version__ = "0.10.0"
+__version__ = "0.10.0b1"
 
 __all__ = [
     "FastAPIMCP",
