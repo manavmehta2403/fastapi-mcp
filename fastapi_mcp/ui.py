@@ -68,7 +68,7 @@ def render_nav_bar(
       <a href="{p.ui_path}" class="fapm-nav-brand">
         <span class="fapm-brand-logo">⚡ FastMCP</span>
         <span class="fapm-brand-title">{title}</span>
-        <span class="fapm-badge-ver">v0.9.0</span>
+        <span class="fapm-badge-ver">v0.10.0</span>
       </a>
 
       <div class="fapm-nav-tabs">
