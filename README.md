@@ -22,6 +22,7 @@
 * 🌐 **Unified Navigation Dock**: Bridges FastAPI REST documentation (`/docs`, `/redoc`) and MCP Developer Studio (`/mcp/ui`) with seamless, zero-breaking-change navigation and a 1-click **Client Connect Modal** (Claude, Cursor, Windsurf).
 * 🔄 **2-Line Existing App Conversion**: Point to any existing FastAPI application and automatically expose its endpoints as MCP tools with zero changes to your existing code.
 * ⚡ **Zero-Network In-Memory Dispatch**: In-memory ASGI transport executes tool calls directly without TCP socket loopbacks, preserving FastAPI `Depends()` injections, auth, and Pydantic validation.
+* 🚪 **Industry-Standard Hybrid Gateway & BYOG**: Deploy as a unified REST + MCP gateway, headless agentic BFF, or plug into your existing corporate infrastructure (Kong, Envoy) with multi-scheme auth (JWT, API keys, Agent On-Behalf-Of delegation) and token-bucket rate limiting.
 
 ---
 
@@ -186,6 +187,40 @@ async def health():
 
 # Mount MCP endpoints onto the server
 app.mount_mcp(path="/mcp", sse_path="/sse")
+```
+
+---
+
+### Pattern 3: Hybrid Gateway & Pluggable BYOG (`BaseGatewayAdapter`)
+
+Deploy as an enterprise Hybrid Gateway with multi-scheme authentication, rate limiting, and tool RBAC, or plug into your own corporate gateway:
+
+```python
+from fastapi_mcp import FastAPIMCP, GatewayMode, AuthMode, DefaultGateway
+
+# Option A: Built-in Industry-Standard Gateway with Dual Auth (JWT + API Key)
+gateway = DefaultGateway(
+    auth_mode=AuthMode.DUAL,
+    api_keys={"sk_live_enterprise_secret_123"},
+    jwt_secret="jwt_signing_key_xyz",
+    rate_limit_per_minute=120,
+)
+
+app = FastAPIMCP(
+    title="Core Enterprise Platform",
+    mcp_name="PlatformTools",
+    gateway=gateway,
+    gateway_mode=GatewayMode.HYBRID,
+)
+
+# Dual endpoint protected by Gateway Auth & Scope RBAC
+@app.api_tool("/billing/refund", methods=["POST"], required_scopes=["billing:write"])
+async def process_refund(invoice_id: str, amount: float):
+    """Issue a refund against an invoice."""
+    return {"status": "refunded", "invoice_id": invoice_id, "amount": amount}
+
+# Option B: BYOG - Export as a clean sub-application into existing Kong/Envoy/FastAPI
+# existing_corp_gateway.mount("/ai-gateway", app.as_gateway_subapp())
 ```
 
 ---

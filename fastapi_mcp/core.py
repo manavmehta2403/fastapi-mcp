@@ -1,6 +1,7 @@
 """FastAPI integration with MCP server support."""
 
 from contextlib import asynccontextmanager
+import functools
 import inspect
 import json
 from typing import (
@@ -15,12 +16,14 @@ from typing import (
 from fastapi import FastAPI
 from fastapi.routing import APIRoute
 from mcp.server.mcpserver import MCPServer
+from mcp.server.mcpserver.exceptions import ToolError
 from pydantic import BaseModel
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse
 from starlette.routing import request_response
 
 from .scanner import RouteScanner, sanitize_tool_name
+from .gateway import GatewayMode, BaseGatewayAdapter
 from .ui import (
     NavPaths,
     generate_mcp_openapi_spec,
@@ -82,6 +85,8 @@ class FastAPIMCP(FastAPI):
         tool_name_prefix: str = "",
         existing_app: Optional[FastAPI] = None,
         lifespan: Optional[Callable[[Any], Any]] = None,
+        gateway: Optional[BaseGatewayAdapter] = None,
+        gateway_mode: GatewayMode = GatewayMode.HYBRID,
         **kwargs: Any,
     ):
         """Initialize FastAPIMCP instance."""
@@ -98,6 +103,17 @@ class FastAPIMCP(FastAPI):
 
         if session_context_provider:
             setattr(self._target_app, "_mcp_session_context_provider", session_context_provider)
+
+        self.gateway = gateway
+        self.gateway_mode = gateway_mode
+
+        if self.gateway_mode == GatewayMode.MCP_ONLY:
+            kwargs.setdefault("docs_url", None)
+            kwargs.setdefault("redoc_url", None)
+            kwargs.setdefault("openapi_url", None)
+
+        if self.gateway_mode == GatewayMode.REST_ONLY:
+            auto_scan = False
 
         self.scanner = RouteScanner(
             app=self._target_app,
@@ -145,6 +161,9 @@ class FastAPIMCP(FastAPI):
         else:
             if self.auto_scan:
                 self.scan_routes()
+
+        if self.gateway is not None:
+            self._setup_gateway_middleware(self.gateway)
 
     @classmethod
     def bind(
@@ -351,6 +370,7 @@ class FastAPIMCP(FastAPI):
         methods: Optional[List[str]] = None,
         tool_name: Optional[str] = None,
         tool_description: Optional[str] = None,
+        required_scopes: Optional[List[str]] = None,
         **route_kwargs: Any,
     ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
         """Decorator that registers a function as BOTH a FastAPI REST route AND an MCP tool."""
@@ -382,6 +402,9 @@ class FastAPIMCP(FastAPI):
                 _, _, runner = self.scanner.convert_route(route_matches[-1])
             else:
                 runner = func
+
+            if required_scopes and self.gateway:
+                runner = self._wrap_scoped_runner(runner, name, required_scopes)
 
             setattr(runner, "_is_dual_tool", True)
             self._tool_catalog[name] = (name, doc, runner)
@@ -431,6 +454,68 @@ class FastAPIMCP(FastAPI):
     def prompt(self, *args: Any, **kwargs: Any) -> Callable:
         """Register an MCP prompt."""
         return self.mcp_server.prompt(*args, **kwargs)
+
+    def _wrap_scoped_runner(
+        self,
+        runner: Callable[..., Any],
+        tool_name: str,
+        required_scopes: List[str],
+    ) -> Callable[..., Any]:
+        """Wrap tool runner with gateway scope authorization check."""
+        @functools.wraps(runner)
+        async def auth_guarded_runner(*args: Any, **kwargs: Any) -> Any:
+            if self.gateway:
+                headers: Dict[str, str] = {}
+                provider: Any = (
+                    getattr(self._target_app, "_mcp_session_context_provider", None)
+                    or getattr(self, "session_context_provider", None)
+                )
+                if callable(provider):
+                    caller = getattr(provider, "__call__", None)
+                    if caller is not None:
+                        try:
+                            dyn_headers = caller(kwargs)
+                        except TypeError:
+                            dyn_headers = caller()
+                        if isinstance(dyn_headers, dict):
+                            headers = dyn_headers
+
+                auth_ctx = await self.gateway.authenticate(headers)
+                authorized = await self.gateway.authorize_tool(
+                    tool_name, required_scopes, auth_ctx
+                )
+                if not authorized:
+                    err_msg = (
+                        f"Forbidden: caller lacks required scopes {required_scopes} "
+                        f"for tool {tool_name}"
+                    )
+                    raise ToolError(err_msg)
+            if inspect.iscoroutinefunction(runner):
+                return await runner(*args, **kwargs)
+            return runner(*args, **kwargs)
+
+        return auth_guarded_runner
+
+    def _setup_gateway_middleware(self, gateway: BaseGatewayAdapter) -> None:
+        """Register gateway authentication and rate limiting middleware."""
+        @self._target_app.middleware("http")
+        async def gateway_middleware(request: Request, call_next: Callable) -> Any:
+            client_key = (
+                request.headers.get("x-api-key")
+                or request.headers.get("authorization", "")
+                or (request.client.host if request.client else "127.0.0.1")
+            )
+            allowed, retry_after = await gateway.check_rate_limit(client_key)
+            if not allowed:
+                return JSONResponse(
+                    status_code=429,
+                    content={"detail": "Too Many Requests: rate limit exceeded"},
+                    headers={"Retry-After": str(int(retry_after) + 1)},
+                )
+
+            auth_ctx = await gateway.authenticate(dict(request.headers))
+            request.state.auth_context = auth_ctx
+            return await call_next(request)
 
     def _setup_ui_routes(
         self,
@@ -660,6 +745,8 @@ class FastAPIMCP(FastAPI):
         enable_ui: bool = True,
     ) -> None:
         """Mounts MCP transports (SSE and Streamable HTTP) onto another FastAPI app."""
+        if self.gateway_mode == GatewayMode.REST_ONLY:
+            return
         if enable_ui and path:
             self._setup_ui_routes(target_app, mcp_path=path, sse_path=sse_path or "/sse")
 
@@ -684,6 +771,8 @@ class FastAPIMCP(FastAPI):
         enable_ui: bool = True,
     ) -> None:
         """Mounts MCP transports directly onto self."""
+        if self.gateway_mode == GatewayMode.REST_ONLY:
+            return
         if enable_ui and path:
             self._setup_ui_routes(self, mcp_path=path, sse_path=sse_path or "/sse")
 
