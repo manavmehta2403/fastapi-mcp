@@ -24,6 +24,7 @@ from starlette.routing import request_response
 
 from .scanner import RouteScanner, sanitize_tool_name
 from .gateway import GatewayMode, BaseGatewayAdapter
+from .streaming import StreamToolSession, collect_stream
 from .ui import (
     NavPaths,
     generate_mcp_openapi_spec,
@@ -292,6 +293,7 @@ class FastAPIMCP(FastAPI):
                     "category": tags[0] if tags else "default",
                     "description": t_doc,
                     "parameters": params_info,
+                    "is_streaming": getattr(runner, "_is_streaming", False),
                 })
 
             return {
@@ -315,6 +317,9 @@ class FastAPIMCP(FastAPI):
 
             _, _, runner = self._tool_catalog[tool_name]
             try:
+                if getattr(runner, "_is_streaming", False):
+                    stream_fn = getattr(runner, "_stream_func", runner)
+                    return await collect_stream(stream_fn(**args))
                 if inspect.iscoroutinefunction(runner):
                     return await runner(**args)
                 return runner(**args)
@@ -454,6 +459,65 @@ class FastAPIMCP(FastAPI):
     def prompt(self, *args: Any, **kwargs: Any) -> Callable:
         """Register an MCP prompt."""
         return self.mcp_server.prompt(*args, **kwargs)
+
+    def stream_tool(
+        self,
+        name: Optional[str] = None,
+        description: Optional[str] = None,
+        max_buffer: int = 100,
+        required_scopes: Optional[List[str]] = None,
+        **kwargs: Any,
+    ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+        """Decorator for streaming structured output tools returning async generators."""
+        def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
+            s_name = sanitize_tool_name(name or func.__name__)
+            s_doc = description or func.__doc__ or "Streaming tool returning incremental chunks."
+
+            @functools.wraps(func)
+            async def non_streaming_runner(*fn_args: Any, **fn_kwargs: Any) -> Dict[str, Any]:
+                gen = func(*fn_args, **fn_kwargs)
+                return await collect_stream(gen, max_items=max_buffer)
+
+            non_streaming_runner.__annotations__["return"] = Dict[str, Any]
+            setattr(non_streaming_runner, "__name__", s_name)
+            setattr(non_streaming_runner, "__doc__", s_doc)
+            setattr(non_streaming_runner, "_is_dual_tool", False)
+            setattr(non_streaming_runner, "_is_streaming", True)
+            setattr(non_streaming_runner, "_stream_func", func)
+
+            runner_to_register: Callable[..., Any] = non_streaming_runner
+            if required_scopes:
+                runner_to_register = self._wrap_scoped_runner(
+                    non_streaming_runner, s_name, required_scopes
+                )
+            self._tool_catalog[s_name] = (s_name, s_doc, runner_to_register)
+
+            if not self.librarian:
+                self.mcp_server.add_tool(
+                    runner_to_register, name=s_name, description=s_doc, **kwargs
+                )
+                self._registered_tool_names.add(s_name)
+            else:
+                if self._scanned:
+                    self._register_librarian_meta_tools()
+            return func
+
+        return decorator
+
+    def call_stream_tool(
+        self,
+        name: str,
+        arguments: Optional[Dict[str, Any]] = None,
+        max_buffered: int = 100,
+    ) -> StreamToolSession:
+        """Call a registered streaming tool and return an active StreamToolSession."""
+        if name not in self._tool_catalog:
+            raise KeyError(f"Streaming tool '{name}' not found in catalog.")
+        _, _, runner = self._tool_catalog[name]
+        stream_fn = getattr(runner, "_stream_func", runner)
+        args = arguments or {}
+        gen = stream_fn(**args)
+        return StreamToolSession(gen, max_buffered=max_buffered)
 
     def _wrap_scoped_runner(
         self,
@@ -821,6 +885,9 @@ class FastAPIMCP(FastAPI):
         args = arguments or {}
         if self.librarian and name in self._tool_catalog:
             _, _, runner = self._tool_catalog[name]
+            if getattr(runner, "_is_streaming", False):
+                stream_fn = getattr(runner, "_stream_func", runner)
+                return await collect_stream(stream_fn(**args))
             if inspect.iscoroutinefunction(runner):
                 return await runner(**args)
             return runner(**args)
