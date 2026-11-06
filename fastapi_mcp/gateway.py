@@ -11,10 +11,12 @@ import hashlib
 import hmac
 import json
 import time
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 from fastapi import FastAPI
 from pydantic import BaseModel, Field
+from starlette.requests import Request
+from starlette.responses import JSONResponse
 
 
 class GatewayMode(str, Enum):
@@ -284,3 +286,25 @@ def create_gateway_subapp(
     subapp = FastAPI(title=f"{getattr(mcp_app, 'mcp_name', 'FastAPIMCP')} Gateway")
     mcp_app.mount_to(subapp, path=path, sse_path=sse_path, enable_ui=enable_ui)
     return subapp
+
+
+def setup_gateway_middleware(target_app: FastAPI, gateway: BaseGatewayAdapter) -> None:
+    """Register gateway authentication and rate limiting middleware."""
+    @target_app.middleware("http")
+    async def gateway_middleware(request: Request, call_next: Callable) -> Any:
+        client_key = (
+            request.headers.get("x-api-key")
+            or request.headers.get("authorization", "")
+            or (request.client.host if request.client else "127.0.0.1")
+        )
+        allowed, retry_after = await gateway.check_rate_limit(client_key)
+        if not allowed:
+            return JSONResponse(
+                status_code=429,
+                content={"detail": "Too Many Requests: rate limit exceeded"},
+                headers={"Retry-After": str(int(retry_after) + 1)},
+            )
+
+        auth_ctx = await gateway.authenticate(dict(request.headers))
+        request.state.auth_context = auth_ctx
+        return await call_next(request)
