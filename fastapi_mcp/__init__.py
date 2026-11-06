@@ -40,8 +40,12 @@ from .protocols import (
 from .mesh import (
     AgentMesh,
 )
+from .webrtc import (
+    WebRTCChannelSession,
+    WebRTCManager,
+)
 
-__version__ = "0.9.0"
+__version__ = "0.10.0"
 
 __all__ = [
     "FastAPIMCP",
@@ -66,4 +70,6 @@ __all__ = [
     "verify_hmac_signature",
     "ProtocolGateway",
     "AgentMesh",
+    "WebRTCChannelSession",
+    "WebRTCManager",
 ]
