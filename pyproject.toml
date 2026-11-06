@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fastapi-fastmcp"
-version = "0.3.0"
+version = "0.4.0"
 description = "The unified bridge between FastAPI and FastMCP / Model Context Protocol."
 readme = "README.md"
 authors = [{ name = "Manav Mehta" }]
@@ -64,6 +64,7 @@ max-args = 15
 max-attributes = 15
 max-locals = 25
 max-statements = 60
+max-public-methods = 35
 
 [tool.pylint.messages_control]
 disable = [

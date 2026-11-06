@@ -15,8 +15,13 @@ from .gateway import (
     DefaultGateway,
     create_gateway_subapp,
 )
+from .streaming import (
+    StreamChunk,
+    StreamToolSession,
+    collect_stream,
+)
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 __all__ = [
     "FastAPIMCP",
@@ -28,4 +33,7 @@ __all__ = [
     "BaseGatewayAdapter",
     "DefaultGateway",
     "create_gateway_subapp",
+    "StreamChunk",
+    "StreamToolSession",
+    "collect_stream",
 ]
