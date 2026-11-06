@@ -20,8 +20,13 @@ from .streaming import (
     StreamToolSession,
     collect_stream,
 )
+from .jobs import (
+    JobProgress,
+    JobState,
+    JobRegistry,
+)
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 
 __all__ = [
     "FastAPIMCP",
@@ -36,4 +41,7 @@ __all__ = [
     "StreamChunk",
     "StreamToolSession",
     "collect_stream",
+    "JobProgress",
+    "JobState",
+    "JobRegistry",
 ]
