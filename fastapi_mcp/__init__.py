@@ -37,8 +37,11 @@ from .webhooks import (
 from .protocols import (
     ProtocolGateway,
 )
+from .mesh import (
+    AgentMesh,
+)
 
-__version__ = "0.8.0"
+__version__ = "0.9.0"
 
 __all__ = [
     "FastAPIMCP",
@@ -62,4 +65,5 @@ __all__ = [
     "WebhookManager",
     "verify_hmac_signature",
     "ProtocolGateway",
+    "AgentMesh",
 ]
