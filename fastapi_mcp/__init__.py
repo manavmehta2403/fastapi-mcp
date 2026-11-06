@@ -34,8 +34,11 @@ from .webhooks import (
     WebhookManager,
     verify_hmac_signature,
 )
+from .protocols import (
+    ProtocolGateway,
+)
 
-__version__ = "0.7.0"
+__version__ = "0.8.0"
 
 __all__ = [
     "FastAPIMCP",
@@ -58,4 +61,5 @@ __all__ = [
     "EventBroker",
     "WebhookManager",
     "verify_hmac_signature",
+    "ProtocolGateway",
 ]
