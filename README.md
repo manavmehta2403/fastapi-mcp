@@ -225,6 +225,110 @@ async def process_refund(invoice_id: str, amount: float):
 
 ---
 
+## 🌊 Streaming Tools (`@app.stream_tool`)
+
+Stream incremental tokens, intermediate reasoning steps, or chunked outputs to LLMs:
+
+```python
+from fastapi_mcp import FastAPIMCP
+
+app = FastAPIMCP(title="StreamingService")
+
+@app.stream_tool()
+async def stream_reasoning(prompt: str):
+    """Stream token-by-token reasoning output."""
+    for token in ["Analyzing...", "Processing...", f"Done for: {prompt}"]:
+        yield token
+```
+
+---
+
+## ⏳ Asynchronous Long-Running Jobs (`@app.job`)
+
+Offload long-running background tasks with automatic polling, progress updates, and TTL eviction:
+
+```python
+@app.job()
+async def train_model(dataset: str, progress):
+    """Execute background job with progress reporting."""
+    await progress.update(50, "Training halfway...")
+    return {"status": "completed", "dataset": dataset}
+```
+
+---
+
+## 📢 Real-Time Event Subscriptions (`@app.event`)
+
+Wildcard event pub/sub routing (`topic.*`, `topic.#`) for decoupled agent event streams:
+
+```python
+@app.event("orders.*")
+async def handle_order_events(event):
+    print(f"Order event received on {event.topic}: {event.payload}")
+
+# Publish events anywhere in your application
+await app.publish_event("orders.created", {"order_id": "ord_123", "total": 99.0})
+```
+
+---
+
+## 🪝 Inbound Webhooks Gateway (`@app.webhook`)
+
+Secure inbound webhook ingestion with automated HMAC-SHA256 signature verification:
+
+```python
+@app.webhook("/webhooks/stripe", secret_env="STRIPE_WEBHOOK_SECRET")
+async def stripe_webhook(payload: dict):
+    return {"status": "received", "event_id": payload.get("id")}
+```
+
+---
+
+## 🔌 Multi-Protocol Adapters (gRPC & GraphQL)
+
+Mount downstream gRPC or GraphQL services directly into your MCP tool catalog with clean namespacing:
+
+```python
+# Mount downstream gRPC services
+app.mount_grpc(target="billing-service:50051", prefix="billing")
+
+# Mount downstream GraphQL queries
+app.mount_graphql(url="https://api.example.com/graphql", prefix="catalog")
+```
+
+---
+
+## 🌐 Distributed Agent Mesh (`app.mount_remote`)
+
+Namespace and proxy to remote MCP server instances with automatic hop limiting and circular routing detection:
+
+```python
+app.mount_remote(
+    url="http://billing-svc:8000/mcp",
+    prefix="billing",
+    tools=["invoice", "refund"],
+    token="mesh-bearer-token",
+)
+```
+
+---
+
+## 📡 WebRTC Real-Time Agent Channels (`@app.webrtc_channel`)
+
+Sub-millisecond peer-to-peer SCTP DataChannels and SDP signaling for robotics and real-time audio/video AI agents:
+
+```python
+@app.webrtc_channel("telemetry")
+async def handle_telemetry(session):
+    data = await session.receive()
+    await session.send({"ack": True, "received": data})
+
+# Mount HTTP SDP offer/answer signaling endpoints
+app.mount_webrtc(path="/mcp/webrtc")
+```
+
+---
+
 ## 🌐 Deployment Options
 
 ### Option A: Single Port Deployment (Default & Recommended)

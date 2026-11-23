@@ -1,13 +1,11 @@
 """Streaming Structured Output implementation for FastAPI-MCP."""
 
-from dataclasses import dataclass
 from typing import Any, AsyncGenerator, Dict, Optional
 
 from pydantic import BaseModel
 
 
-@dataclass
-class StreamChunk:
+class StreamChunk(BaseModel):
     """A single chunk emitted over a streaming tool session."""
 
     chunk_id: int

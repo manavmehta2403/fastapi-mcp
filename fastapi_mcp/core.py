@@ -201,6 +201,25 @@ class FastAPIMCP(FastAPI):
             self.scan_routes()
         return self._tool_catalog
 
+    def to_pydantic_ai_tools(
+        self,
+        names: Optional[List[str]] = None,
+    ) -> List[Callable[..., Any]]:
+        """Export registered MCP tools as native Pydantic AI agent tools.
+
+        Returns callable tool runners with Pydantic v2 signatures compatible with
+        `pydantic_ai.Agent(tools=[...])`.
+
+        Args:
+            names: Optional subset of tool names to export. If None, exports all tools.
+
+        Returns:
+            List of callable tool runners with Pydantic v2 type signatures.
+        """
+        catalog = self.get_tool_catalog()
+        selected = names if names is not None else list(catalog.keys())
+        return [catalog[name][2] for name in selected if name in catalog]
+
     def _extract_param_schema(self, runner: Callable) -> Dict[str, Any]:
         """Extract parameter names, types, and defaults from a runner callable."""
         sig = getattr(runner, "__signature__", None)
