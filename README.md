@@ -6,6 +6,8 @@
 </p>
 
 <p align="center">
+  <a href="https://pypi.org/project/fastapi-fastmcp/"><img src="https://img.shields.io/pypi/v/fastapi-fastmcp.svg" alt="PyPI version"></a>
+  <a href="https://pypi.org/project/fastapi-fastmcp/"><img src="https://img.shields.io/badge/version-0.10.0-blue.svg" alt="Version 0.10.0"></a>
   <a href="#-key-highlights"><img src="https://img.shields.io/badge/FastAPI-009688?style=flat&logo=fastapi&logoColor=white" alt="FastAPI"></a>
   <a href="#-key-highlights"><img src="https://img.shields.io/badge/MCP-Protocol-blueviolet?style=flat" alt="MCP"></a>
   <a href="#-key-highlights"><img src="https://img.shields.io/badge/Python-3.10+-3776AB?style=flat&logo=python&logoColor=white" alt="Python"></a>
@@ -22,6 +24,7 @@
 * 🌐 **Unified Navigation Dock**: Bridges FastAPI REST documentation (`/docs`, `/redoc`) and MCP Developer Studio (`/mcp/ui`) with seamless, zero-breaking-change navigation and a 1-click **Client Connect Modal** (Claude, Cursor, Windsurf).
 * 🔄 **2-Line Existing App Conversion**: Point to any existing FastAPI application and automatically expose its endpoints as MCP tools with zero changes to your existing code.
 * ⚡ **Zero-Network In-Memory Dispatch**: In-memory ASGI transport executes tool calls directly without TCP socket loopbacks, preserving FastAPI `Depends()` injections, auth, and Pydantic validation.
+* 🧠 **Native Pydantic AI Tooling**: Direct, zero-overhead tool exports into Pydantic AI agents (`app.to_pydantic_ai_tools()`) with full Pydantic v2 validation and no intermediate HTTP network hops.
 * 🚪 **Industry-Standard Hybrid Gateway & BYOG**: Deploy as a unified REST + MCP gateway, headless agentic BFF, or plug into your existing corporate infrastructure (Kong, Envoy) with multi-scheme auth (JWT, API keys, Agent On-Behalf-Of delegation) and token-bucket rate limiting.
 
 ---
@@ -329,6 +332,25 @@ app.mount_webrtc(path="/mcp/webrtc")
 
 ---
 
+## 🧠 Native Pydantic AI Integration (`app.to_pydantic_ai_tools()`)
+
+Export your entire FastAPI-FastMCP tool suite directly into Pydantic AI agents with zero network serialization overhead and native Pydantic v2 validation:
+
+```python
+from pydantic_ai import Agent
+from fastapi_mcp import FastAPIMCP
+
+mcp = FastAPIMCP(auto_scan=True)
+
+# Export all registered tools directly to Pydantic AI
+tools = mcp.to_pydantic_ai_tools()
+
+# Pass directly to your agent
+agent = Agent("gemini-2.0-flash", tools=tools)
+```
+
+---
+
 ## 🌐 Deployment Options
 
 ### Option A: Single Port Deployment (Default & Recommended)
@@ -373,7 +395,7 @@ if __name__ == "__main__":
 
 ## 🤖 FastAPI-MCP Studio (`/mcp/ui`) & Unified Navigation
 
-FastAPI-MCP v0.2.0 introduces a dedicated, world-class developer studio that unifies REST documentation and the Model Context Protocol ecosystem:
+FastAPI-MCP v0.10.0 introduces a dedicated, world-class developer studio that unifies REST documentation and the Model Context Protocol ecosystem:
 
 ### 1. The 3 MCP Primitives in One Workbench
 - 🛠️ **Tools (`@app.api_tool()`, `@app.tool()`)**: Dynamic schema parameter forms, live in-memory execution, latency timing (e.g. `200 OK (34ms)`), formatted output viewer, and 1-click executable client snippets (**Python FastMCP Client**, **cURL JSON-RPC 2.0**, and **TypeScript SDK**).

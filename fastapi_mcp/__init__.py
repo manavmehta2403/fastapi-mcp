@@ -1,4 +1,4 @@
-"""FastAPI-MCP: Seamless bridge between FastAPI and FastMCP / Model Context Protocol.
+"""FastAPI-MCP: The unified bridge between FastAPI and FastMCP / Model Context Protocol.
 
 Convert existing FastAPI applications to MCP servers with zero code changes,
 or build unified APIs where REST endpoints and MCP tools coexist effortlessly.
@@ -46,8 +46,11 @@ from .webrtc import (
 )
 
 __version__ = "0.10.0"
+__description__ = "The unified bridge between FastAPI and FastMCP / Model Context Protocol."
 
 __all__ = [
+    "__version__",
+    "__description__",
     "FastAPIMCP",
     "RouteScanner",
     "ASGIDispatcher",

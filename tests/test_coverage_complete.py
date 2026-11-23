@@ -550,14 +550,31 @@ async def test_version_and_http_query_decorator():
     # Enforce strict cross-file version synchronization
     root_dir = Path(__file__).resolve().parent.parent
     with open(root_dir / "pyproject.toml", "r", encoding="utf-8") as f:
-        pyproj_match = re.search(r'version\s*=\s*"([^"]+)"', f.read())
+        pyproj_content = f.read()
+        pyproj_match = re.search(r'version\s*=\s*"([^"]+)"', pyproj_content)
         pyproj_ver = pyproj_match.group(1) if pyproj_match else None
+        pyproj_desc_match = re.search(r'description\s*=\s*"([^"]+)"', pyproj_content)
+        pyproj_desc = pyproj_desc_match.group(1) if pyproj_desc_match else None
 
     with open(root_dir / "fastapi_mcp" / "ui.py", "r", encoding="utf-8") as f:
         ui_match = re.search(r'class="fapm-badge-ver">v?([0-9\.]+)<', f.read())
         ui_ver = ui_match.group(1) if ui_match else None
 
-    assert pyproj_ver == fastapi_mcp.__version__ == ui_ver == "0.10.0"
+    with open(root_dir / "README.md", "r", encoding="utf-8") as f:
+        readme_content = f.read()
+        readme_ver_match = re.search(r'version-([0-9\.]+)-blue', readme_content)
+        readme_ver = readme_ver_match.group(1) if readme_ver_match else None
+        readme_desc_match = re.search(r'<b>([^<]+)</b>', readme_content)
+        readme_desc = readme_desc_match.group(1) if readme_desc_match else None
+
+    assert pyproj_ver == fastapi_mcp.__version__ == ui_ver == readme_ver == "0.10.0"
+    assert (
+        fastapi_mcp.__description__
+        == pyproj_desc
+        == readme_desc
+        == "The unified bridge between FastAPI and FastMCP / Model Context Protocol."
+    )
+    assert "0.2.0" not in readme_content
 
     app = FastAPIMCP(auto_scan=True)
 

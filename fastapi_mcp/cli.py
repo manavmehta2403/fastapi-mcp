@@ -72,7 +72,10 @@ def main(args_list: Any = None) -> None:
     """Run the FastAPI-MCP command-line interface."""
     parser = argparse.ArgumentParser(
         prog="fastapi-mcp",
-        description="FastAPI-MCP: Run or inspect FastAPI applications as MCP servers",
+        description=(
+            "FastAPI-MCP: The unified bridge between FastAPI and FastMCP / "
+            "Model Context Protocol."
+        ),
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
