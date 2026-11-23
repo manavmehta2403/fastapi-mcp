@@ -25,6 +25,7 @@ from .jobs import JobRegistry, execute_job_worker, register_job_meta_tools
 from .events import EventBroker
 from .webhooks import WebhookManager
 from .protocols import ProtocolGateway
+from .mesh import AgentMesh
 from .ui import setup_mcp_ui_routes
 
 
@@ -80,6 +81,8 @@ class FastAPIMCP(FastAPI):
         self.webhook_manager = WebhookManager()
         self.protocols = ProtocolGateway(self)
         self.gateways = self.protocols
+        self.agent_mesh = AgentMesh(self)
+        self.mesh = self.agent_mesh
 
         if session_context_provider:
             setattr(self._target_app, "_mcp_session_context_provider", session_context_provider)
@@ -664,6 +667,19 @@ class FastAPIMCP(FastAPI):
             operations=operations,
             default_headers=default_headers,
             transport=transport,
+        )
+
+    def mount_remote(
+        self,
+        url: str,
+        prefix: str,
+        tools: Optional[List[str]] = None,
+        token: Optional[str] = None,
+        transport: Optional[Any] = None,
+    ) -> List[str]:
+        """Mount and namespace a remote MCP server cluster into the gateway catalog."""
+        return self.agent_mesh.mount_remote(
+            url=url, prefix=prefix, tools=tools, token=token, transport=transport
         )
 
     def _wrap_scoped_runner(
