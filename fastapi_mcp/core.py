@@ -24,9 +24,10 @@ from starlette.responses import HTMLResponse, JSONResponse
 from starlette.routing import request_response
 
 from .scanner import RouteScanner, sanitize_tool_name
-from .gateway import GatewayMode, BaseGatewayAdapter
+from .gateway import GatewayMode, BaseGatewayAdapter, setup_gateway_middleware
 from .streaming import StreamToolSession, collect_stream
 from .jobs import JobRegistry, execute_job_worker, register_job_meta_tools
+from .events import EventBroker
 from .ui import (
     NavPaths,
     generate_mcp_openapi_spec,
@@ -109,6 +110,7 @@ class FastAPIMCP(FastAPI):
             ttl_seconds=job_ttl_seconds,
             max_completed=max_completed_jobs,
         )
+        self.event_broker = EventBroker()
 
         if session_context_provider:
             setattr(self._target_app, "_mcp_session_context_provider", session_context_provider)
@@ -167,6 +169,7 @@ class FastAPIMCP(FastAPI):
                         yield
             finally:
                 await self.job_registry.cancel_all()
+                await self.event_broker.close_all()
 
         if existing_app is None:
             super().__init__(*args, lifespan=unified_lifespan, **kwargs)
@@ -597,6 +600,29 @@ class FastAPIMCP(FastAPI):
 
         return decorator
 
+    def event(
+        self,
+        topic: str,
+    ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+        """Register a handler callback for an event topic pattern."""
+        def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
+            self.event_broker.register_topic(topic, func)
+            return func
+
+        return decorator
+
+    async def publish_event(self, topic: str, payload: Any) -> int:
+        """Publish an event to all matching subscribers and handlers."""
+        return await self.event_broker.publish(topic, payload)
+
+    async def subscribe_events(
+        self,
+        pattern: str,
+        max_queue_size: Optional[int] = None,
+    ) -> asyncio.Queue:
+        """Subscribe to a topic pattern and return an event queue."""
+        return await self.event_broker.subscribe(pattern, max_queue_size=max_queue_size)
+
     def _wrap_scoped_runner(
         self,
         runner: Callable[..., Any],
@@ -640,24 +666,7 @@ class FastAPIMCP(FastAPI):
 
     def _setup_gateway_middleware(self, gateway: BaseGatewayAdapter) -> None:
         """Register gateway authentication and rate limiting middleware."""
-        @self._target_app.middleware("http")
-        async def gateway_middleware(request: Request, call_next: Callable) -> Any:
-            client_key = (
-                request.headers.get("x-api-key")
-                or request.headers.get("authorization", "")
-                or (request.client.host if request.client else "127.0.0.1")
-            )
-            allowed, retry_after = await gateway.check_rate_limit(client_key)
-            if not allowed:
-                return JSONResponse(
-                    status_code=429,
-                    content={"detail": "Too Many Requests: rate limit exceeded"},
-                    headers={"Retry-After": str(int(retry_after) + 1)},
-                )
-
-            auth_ctx = await gateway.authenticate(dict(request.headers))
-            request.state.auth_context = auth_ctx
-            return await call_next(request)
+        setup_gateway_middleware(self._target_app, gateway)
 
     def _setup_ui_routes(
         self,
