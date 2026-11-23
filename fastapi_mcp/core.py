@@ -4,7 +4,6 @@ from contextlib import asynccontextmanager
 import asyncio
 import functools
 import inspect
-import json
 from typing import (
     Any,
     Callable,
@@ -18,48 +17,14 @@ from fastapi import FastAPI
 from fastapi.routing import APIRoute
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
-from pydantic import BaseModel
-from starlette.requests import Request
-from starlette.responses import HTMLResponse, JSONResponse
-from starlette.routing import request_response
 
 from .scanner import RouteScanner, sanitize_tool_name
 from .gateway import GatewayMode, BaseGatewayAdapter, setup_gateway_middleware
 from .streaming import StreamToolSession, collect_stream
 from .jobs import JobRegistry, execute_job_worker, register_job_meta_tools
 from .events import EventBroker
-from .ui import (
-    NavPaths,
-    generate_mcp_openapi_spec,
-    get_mcp_swagger_html,
-    get_official_redoc_html,
-    get_official_swagger_ui_html,
-    inject_nav_bar_into_html,
-)
-
-
-class ToolCallRequest(BaseModel):
-    """Payload schema for executing MCP tools via the Swagger UI.
-
-    Attributes:
-        name: Name of the registered MCP tool to invoke.
-        arguments: Dictionary of arguments matching the tool's input schema.
-    """
-
-    name: str
-    arguments: Dict[str, Any] = {}
-
-
-class PromptCallRequest(BaseModel):
-    """Payload schema for rendering an MCP prompt template via the Studio UI.
-
-    Attributes:
-        name: Name of the registered MCP prompt to invoke.
-        arguments: Dictionary of arguments to fill into the prompt template.
-    """
-
-    name: str
-    arguments: Dict[str, Any] = {}
+from .webhooks import WebhookManager
+from .ui import setup_mcp_ui_routes
 
 
 class FastAPIMCP(FastAPI):
@@ -111,6 +76,7 @@ class FastAPIMCP(FastAPI):
             max_completed=max_completed_jobs,
         )
         self.event_broker = EventBroker()
+        self.webhook_manager = WebhookManager()
 
         if session_context_provider:
             setattr(self._target_app, "_mcp_session_context_provider", session_context_provider)
@@ -623,6 +589,53 @@ class FastAPIMCP(FastAPI):
         """Subscribe to a topic pattern and return an event queue."""
         return await self.event_broker.subscribe(pattern, max_queue_size=max_queue_size)
 
+    def webhook(
+        self,
+        path: str,
+        *,
+        secret: Optional[str] = None,
+        secret_env: Optional[str] = None,
+        header: str = "X-Hub-Signature-256",
+        algorithm: str = "sha256",
+        event_topic: Optional[str] = None,
+        name: Optional[str] = None,
+        description: Optional[str] = None,
+        **route_kwargs: Any,
+    ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+        """Decorator to register an inbound webhook endpoint with HMAC signature verification."""
+        def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
+            wh_name = name or func.__name__
+            wh_opts = {
+                "secret": secret,
+                "secret_env": secret_env,
+                "header": header,
+                "algorithm": algorithm,
+                "event_topic": event_topic,
+            }
+            defn = self.webhook_manager.register(
+                path=path,
+                handler=func,
+                name=wh_name,
+                description=description or (func.__doc__ or "").strip(),
+                **wh_opts,
+            )
+            endpoint_handler = self.webhook_manager.create_route_handler(defn)
+            self._target_app.add_api_route(
+                path,
+                endpoint_handler,
+                methods=["POST"],
+                name=wh_name,
+                description=defn.description,
+                **route_kwargs,
+            )
+            return func
+
+        return decorator
+
+    def list_webhooks(self) -> List[Dict[str, Any]]:
+        """List all registered inbound webhooks and their configuration metadata."""
+        return self.webhook_manager.list_webhooks()
+
     def _wrap_scoped_runner(
         self,
         runner: Callable[..., Any],
@@ -675,218 +688,7 @@ class FastAPIMCP(FastAPI):
         sse_path: str = "/sse",
     ) -> None:
         """Registers interactive MCP Swagger UI, ReDoc, and Studio endpoints."""
-        # pylint: disable=too-many-statements
-        docs_path = f"{mcp_path.rstrip('/')}/docs"
-        redoc_path = f"{mcp_path.rstrip('/')}/redoc"
-        ui_path = f"{mcp_path.rstrip('/')}/ui"
-        openapi_path = f"{mcp_path.rstrip('/')}/openapi.json"
-        call_path = f"{mcp_path.rstrip('/')}/ui/call"
-        resource_path = f"{mcp_path.rstrip('/')}/ui/resource"
-        prompt_path = f"{mcp_path.rstrip('/')}/ui/prompt"
-        tools_pattern = f"{mcp_path.rstrip('/')}/tools/{{tool_name}}"
-
-        paths = NavPaths(
-            mcp_path=mcp_path,
-            sse_path=sse_path,
-            docs_path=docs_path,
-            redoc_path=redoc_path,
-            ui_path=ui_path,
-            rest_docs_url=getattr(target_app, "docs_url", "/docs") or "/docs",
-            rest_redoc_url=getattr(target_app, "redoc_url", "/redoc") or "/redoc",
-        )
-
-        @target_app.get(openapi_path, include_in_schema=False)
-        async def mcp_openapi_spec():
-            tools = await self.list_tools()
-            title = self.mcp_name + (" [Librarian Active]" if self.librarian else "")
-            return generate_mcp_openapi_spec(
-                title=title,
-                tools=tools,
-                mcp_path=mcp_path,
-                catalog=self._tool_catalog,
-            )
-
-        @target_app.get(docs_path, response_class=HTMLResponse, include_in_schema=False)
-        async def mcp_official_swagger():
-            tools = await self.list_tools()
-            title = self.mcp_name + (" [Librarian Active]" if self.librarian else "")
-            spec = generate_mcp_openapi_spec(
-                title=title,
-                tools=tools,
-                mcp_path=mcp_path,
-                catalog=self._tool_catalog,
-            )
-            html = get_official_swagger_ui_html(
-                title=f"{title} - MCP Swagger Explorer",
-                openapi_url=openapi_path,
-                spec=spec,
-                paths=paths,
-                catalog=self._tool_catalog,
-            )
-            return HTMLResponse(html)
-
-        @target_app.get(redoc_path, response_class=HTMLResponse, include_in_schema=False)
-        async def mcp_official_redoc():
-            title = self.mcp_name + (" [Librarian Active]" if self.librarian else "")
-            html = get_official_redoc_html(
-                title=f"{title} - MCP ReDoc",
-                openapi_url=openapi_path,
-                paths=paths,
-                catalog=self._tool_catalog,
-            )
-            return HTMLResponse(html)
-
-        @target_app.get(ui_path, response_class=HTMLResponse, include_in_schema=False)
-        async def mcp_offline_ui():
-            tools = await self.list_tools()
-            resources = await self.list_resources()
-            prompts = await self.list_prompts()
-            title = self.mcp_name + (" [Librarian Active]" if self.librarian else "")
-            html = get_mcp_swagger_html(
-                title=title,
-                tools=tools,
-                resources=resources,
-                prompts=prompts,
-                call_url=call_path,
-                resource_url=resource_path,
-                prompt_url=prompt_path,
-                openapi_url=openapi_path,
-                paths=paths,
-                catalog=self._tool_catalog,
-            )
-            return HTMLResponse(html)
-
-        @target_app.get(resource_path, include_in_schema=False)
-        async def mcp_ui_resource(uri: str):
-            try:
-                res = await self.read_resource(uri)
-                contents = []
-                if isinstance(res, (list, tuple)):
-                    for item in res:
-                        c = getattr(item, "content", None)
-                        mt = getattr(item, "mime_type", "text/plain")
-                        contents.append({
-                            "content": c if c is not None else str(item),
-                            "mime_type": mt or "text/plain",
-                        })
-                else:
-                    c = getattr(res, "content", None)
-                    mt = getattr(res, "mime_type", "text/plain")
-                    contents.append({
-                        "content": c if c is not None else str(res),
-                        "mime_type": mt or "text/plain",
-                    })
-                return {"success": True, "contents": contents}
-            except Exception as e:  # pylint: disable=broad-exception-caught
-                return JSONResponse(
-                    status_code=400,
-                    content={"is_error": True, "error": str(e)},
-                )
-
-        @target_app.post(prompt_path, include_in_schema=False)
-        async def mcp_ui_prompt(req: PromptCallRequest):
-            try:
-                p_result = await self.get_prompt(req.name, req.arguments)
-                messages = []
-                for m in getattr(p_result, "messages", []) or []:
-                    role = getattr(m, "role", "user")
-                    c = getattr(m, "content", "")
-                    text_val = getattr(c, "text", str(c)) if hasattr(c, "text") else str(c)
-                    messages.append({"role": role, "text": text_val})
-                return {"success": True, "messages": messages}
-            except Exception as e:  # pylint: disable=broad-exception-caught
-                return JSONResponse(
-                    status_code=400,
-                    content={"is_error": True, "error": str(e)},
-                )
-
-        @target_app.post(tools_pattern, include_in_schema=False)
-        async def mcp_tool_direct_call(tool_name: str, request: Request):
-            body: Dict[str, Any] = {}
-            if request.headers.get("content-type", "").startswith("application/json"):
-                try:
-                    parsed = await request.json()
-                    if isinstance(parsed, dict):
-                        body = parsed
-                except Exception:  # pylint: disable=broad-exception-caught
-                    pass
-            try:
-                res = await self.call_tool(tool_name, body)
-                output_texts = [
-                    c.text for c in getattr(res, "content", []) if hasattr(c, "text")
-                ]
-                output_str = "\n".join(output_texts) if output_texts else str(res)
-                try:
-                    parsed_json = json.loads(output_str)
-                    return {"success": True, "result": parsed_json}
-                except Exception:  # pylint: disable=broad-exception-caught
-                    return {"success": True, "result": output_str}
-            except Exception as e:  # pylint: disable=broad-exception-caught
-                return JSONResponse(
-                    status_code=400,
-                    content={"is_error": True, "error": str(e)},
-                )
-
-        @target_app.post(call_path, include_in_schema=False)
-        async def mcp_ui_call(req: ToolCallRequest):
-            try:
-                res = await self.call_tool(req.name, req.arguments)
-                output_texts = [
-                    c.text for c in getattr(res, "content", []) if hasattr(c, "text")
-                ]
-                output_str = "\n".join(output_texts) if output_texts else str(res)
-                try:
-                    parsed_json = json.loads(output_str)
-                    return {"success": True, "result": parsed_json}
-                except Exception:  # pylint: disable=broad-exception-caught
-                    return {"success": True, "result": output_str}
-            except Exception as e:  # pylint: disable=broad-exception-caught
-                return {"is_error": True, "error": str(e)}
-
-        self._inject_target_app_docs_nav(target_app=target_app, paths=paths)
-
-    def _inject_target_app_docs_nav(
-        self,
-        target_app: FastAPI,
-        paths: NavPaths,
-    ) -> None:
-        """Wraps target_app /docs and /redoc to inject unified documentation navigation."""
-        for route in getattr(target_app, "routes", []):
-            r_path = getattr(route, "path", None)
-            if (
-                r_path in (paths.rest_docs_url, paths.rest_redoc_url)
-                and hasattr(route, "endpoint")
-            ):
-                if getattr(route.endpoint, "_fapm_injected", False):
-                    continue
-
-                curr = "rest_swagger" if r_path == paths.rest_docs_url else "rest_redoc"
-                orig_endpoint = route.endpoint
-
-                def make_wrapper(orig, current_page):
-                    async def wrapped(*args: Any, **kwargs: Any) -> Any:
-                        resp = (
-                            await orig(*args, **kwargs)
-                            if inspect.iscoroutinefunction(orig)
-                            else orig(*args, **kwargs)
-                        )
-                        if isinstance(resp, HTMLResponse):
-                            body = resp.body.decode()
-                            injected = inject_nav_bar_into_html(
-                                html=body,
-                                current_page=current_page,
-                                title=getattr(target_app, "title", "API Docs"),
-                                paths=paths,
-                            )
-                            return HTMLResponse(content=injected, status_code=resp.status_code)
-                        return resp
-
-                    wrapped._fapm_injected = True  # pylint: disable=protected-access
-                    return wrapped
-
-                route.endpoint = make_wrapper(orig_endpoint, curr)
-                if hasattr(route, "app"):
-                    route.app = request_response(route.endpoint)
+        setup_mcp_ui_routes(self, target_app=target_app, mcp_path=mcp_path, sse_path=sse_path)
 
     def mount_to(
         self,

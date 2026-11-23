@@ -30,8 +30,12 @@ from .events import (
     EventSubscription,
     EventBroker,
 )
+from .webhooks import (
+    WebhookManager,
+    verify_hmac_signature,
+)
 
-__version__ = "0.6.0"
+__version__ = "0.7.0"
 
 __all__ = [
     "FastAPIMCP",
@@ -52,4 +56,6 @@ __all__ = [
     "EventMessage",
     "EventSubscription",
     "EventBroker",
+    "WebhookManager",
+    "verify_hmac_signature",
 ]
