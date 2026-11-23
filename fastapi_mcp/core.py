@@ -26,6 +26,7 @@ from .events import EventBroker
 from .webhooks import WebhookManager
 from .protocols import ProtocolGateway
 from .mesh import AgentMesh
+from .webrtc import WebRTCManager
 from .ui import setup_mcp_ui_routes
 
 
@@ -83,6 +84,8 @@ class FastAPIMCP(FastAPI):
         self.gateways = self.protocols
         self.agent_mesh = AgentMesh(self)
         self.mesh = self.agent_mesh
+        self.webrtc_manager = WebRTCManager(self)
+        self.webrtc = self.webrtc_manager
 
         if session_context_provider:
             setattr(self._target_app, "_mcp_session_context_provider", session_context_provider)
@@ -112,8 +115,18 @@ class FastAPIMCP(FastAPI):
             tool_name_prefix=tool_name_prefix,
         )
 
-        user_lifespan = lifespan
+        unified_lifespan = self._create_lifespan(lifespan)
 
+        if existing_app is None:
+            super().__init__(*args, lifespan=unified_lifespan, **kwargs)
+        else:
+            if self.auto_scan:
+                self.scan_routes()
+
+        if self.gateway is not None:
+            self._setup_gateway_middleware(self.gateway)
+
+    def _create_lifespan(self, user_lifespan: Any) -> Any:
         @asynccontextmanager
         async def unified_lifespan(app: FastAPI):
             if self.auto_scan and not self._scanned:
@@ -142,15 +155,9 @@ class FastAPIMCP(FastAPI):
             finally:
                 await self.job_registry.cancel_all()
                 await self.event_broker.close_all()
+                await self.webrtc_manager.close_all()
 
-        if existing_app is None:
-            super().__init__(*args, lifespan=unified_lifespan, **kwargs)
-        else:
-            if self.auto_scan:
-                self.scan_routes()
-
-        if self.gateway is not None:
-            self._setup_gateway_middleware(self.gateway)
+        return unified_lifespan
 
     @classmethod
     def bind(
@@ -681,6 +688,31 @@ class FastAPIMCP(FastAPI):
         return self.agent_mesh.mount_remote(
             url=url, prefix=prefix, tools=tools, token=token, transport=transport
         )
+
+    def webrtc_channel(
+        self,
+        name: str,
+    ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+        """Decorator to register a handler for a named WebRTC DataChannel."""
+        def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
+            self.webrtc_manager.register_channel(name, func)
+            return func
+
+        return decorator
+
+    def mount_webrtc(self, path: str = "/mcp/webrtc") -> None:
+        """Mount HTTP signaling endpoints for WebRTC peer connection offers/answers."""
+        base = path.rstrip("/")
+
+        @self.post(f"{base}/offer", include_in_schema=False)
+        async def webrtc_offer(session_id: Optional[str] = None) -> Dict[str, Any]:
+            return await self.webrtc_manager.create_offer(session_id=session_id)
+
+        @self.post(f"{base}/answer", include_in_schema=False)
+        async def webrtc_answer(req: Dict[str, Any]) -> Dict[str, Any]:
+            sid = req.get("session_id", "")
+            ans = req.get("sdp", "")
+            return await self.webrtc_manager.process_answer(sid, ans)
 
     def _wrap_scoped_runner(
         self,
