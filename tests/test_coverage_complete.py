@@ -557,7 +557,7 @@ async def test_version_and_http_query_decorator():
         ui_match = re.search(r'class="fapm-badge-ver">v?([0-9\.]+)<', f.read())
         ui_ver = ui_match.group(1) if ui_match else None
 
-    assert pyproj_ver == fastapi_mcp.__version__ == ui_ver == "0.4.0"
+    assert pyproj_ver == fastapi_mcp.__version__ == ui_ver == "0.5.0"
 
     app = FastAPIMCP(auto_scan=True)
 

@@ -1,6 +1,7 @@
 """FastAPI integration with MCP server support."""
 
 from contextlib import asynccontextmanager
+import asyncio
 import functools
 import inspect
 import json
@@ -25,6 +26,7 @@ from starlette.routing import request_response
 from .scanner import RouteScanner, sanitize_tool_name
 from .gateway import GatewayMode, BaseGatewayAdapter
 from .streaming import StreamToolSession, collect_stream
+from .jobs import JobRegistry, execute_job_worker, register_job_meta_tools
 from .ui import (
     NavPaths,
     generate_mcp_openapi_spec,
@@ -88,6 +90,8 @@ class FastAPIMCP(FastAPI):
         lifespan: Optional[Callable[[Any], Any]] = None,
         gateway: Optional[BaseGatewayAdapter] = None,
         gateway_mode: GatewayMode = GatewayMode.HYBRID,
+        job_ttl_seconds: float = 3600.0,
+        max_completed_jobs: int = 1000,
         **kwargs: Any,
     ):
         """Initialize FastAPIMCP instance."""
@@ -101,6 +105,10 @@ class FastAPIMCP(FastAPI):
         self.session_context_provider = session_context_provider
         self.enable_dry_run = enable_dry_run
         self._tool_catalog: Dict[str, Tuple[str, str, Callable]] = {}
+        self.job_registry = JobRegistry(
+            ttl_seconds=job_ttl_seconds,
+            max_completed=max_completed_jobs,
+        )
 
         if session_context_provider:
             setattr(self._target_app, "_mcp_session_context_provider", session_context_provider)
@@ -143,19 +151,22 @@ class FastAPIMCP(FastAPI):
             except (RuntimeError, AttributeError):
                 pass
 
-            if session_cm is not None:
-                async with session_cm:
+            try:
+                if session_cm is not None:
+                    async with session_cm:
+                        if user_lifespan is not None:
+                            async with user_lifespan(app) as maybe_state:
+                                yield maybe_state
+                        else:
+                            yield
+                else:
                     if user_lifespan is not None:
                         async with user_lifespan(app) as maybe_state:
                             yield maybe_state
                     else:
                         yield
-            else:
-                if user_lifespan is not None:
-                    async with user_lifespan(app) as maybe_state:
-                        yield maybe_state
-                else:
-                    yield
+            finally:
+                await self.job_registry.cancel_all()
 
         if existing_app is None:
             super().__init__(*args, lifespan=unified_lifespan, **kwargs)
@@ -518,6 +529,73 @@ class FastAPIMCP(FastAPI):
         args = arguments or {}
         gen = stream_fn(**args)
         return StreamToolSession(gen, max_buffered=max_buffered)
+
+    def _register_job_meta_tools(self) -> None:
+        """Register get_job_status and cancel_job meta tools once."""
+        register_job_meta_tools(self)
+
+    def job(
+        self,
+        name: Optional[str] = None,
+        description: Optional[str] = None,
+        timeout: Optional[float] = None,
+        required_scopes: Optional[List[str]] = None,
+        **kwargs: Any,
+    ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+        """Decorator for asynchronous long-running background jobs."""
+        self._register_job_meta_tools()
+
+        def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
+            j_name = sanitize_tool_name(name or func.__name__)
+            j_doc = description or func.__doc__ or "Asynchronous background job."
+            setattr(func, "_is_mcp_job", True)
+            setattr(func, "_mcp_job_timeout", timeout)
+
+            @functools.wraps(func)
+            async def job_runner(*fn_args: Any, **fn_kwargs: Any) -> Dict[str, Any]:
+                sig = inspect.signature(func)
+                bound = sig.bind_partial(*fn_args, **fn_kwargs)
+                bound.apply_defaults()
+                job_state = await self.job_registry.create_job(tool_name=j_name)
+                task = asyncio.create_task(
+                    execute_job_worker(
+                        job=job_state,
+                        func=func,
+                        args=bound.arguments,
+                        timeout=timeout,
+                    )
+                )
+                job_state.task = task
+                return {
+                    "job_id": job_state.job_id,
+                    "status": "pending",
+                    "message": "Job initiated in background.",
+                }
+
+            job_runner.__annotations__["return"] = Dict[str, Any]
+            setattr(job_runner, "__name__", j_name)
+            setattr(job_runner, "__doc__", j_doc)
+            setattr(job_runner, "_is_dual_tool", False)
+            setattr(job_runner, "_is_mcp_job", True)
+
+            runner_to_register: Callable[..., Any] = job_runner
+            if required_scopes:
+                runner_to_register = self._wrap_scoped_runner(
+                    job_runner, j_name, required_scopes
+                )
+            self._tool_catalog[j_name] = (j_name, j_doc, runner_to_register)
+
+            if not self.librarian:
+                self.mcp_server.add_tool(
+                    runner_to_register, name=j_name, description=j_doc, **kwargs
+                )
+                self._registered_tool_names.add(j_name)
+            else:
+                if self._scanned:
+                    self._register_librarian_meta_tools()
+            return func
+
+        return decorator
 
     def _wrap_scoped_runner(
         self,
