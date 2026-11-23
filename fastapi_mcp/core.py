@@ -24,6 +24,7 @@ from .streaming import StreamToolSession, collect_stream
 from .jobs import JobRegistry, execute_job_worker, register_job_meta_tools
 from .events import EventBroker
 from .webhooks import WebhookManager
+from .protocols import ProtocolGateway
 from .ui import setup_mcp_ui_routes
 
 
@@ -77,6 +78,8 @@ class FastAPIMCP(FastAPI):
         )
         self.event_broker = EventBroker()
         self.webhook_manager = WebhookManager()
+        self.protocols = ProtocolGateway(self)
+        self.gateways = self.protocols
 
         if session_context_provider:
             setattr(self._target_app, "_mcp_session_context_provider", session_context_provider)
@@ -635,6 +638,33 @@ class FastAPIMCP(FastAPI):
     def list_webhooks(self) -> List[Dict[str, Any]]:
         """List all registered inbound webhooks and their configuration metadata."""
         return self.webhook_manager.list_webhooks()
+
+    def mount_grpc(
+        self,
+        target: str,
+        prefix: str,
+        services: Optional[List[str]] = None,
+        lazy: bool = True,
+    ) -> List[str]:
+        """Mount downstream gRPC service(s) as MCP tools via reflection or stub."""
+        return self.protocols.mount_grpc(target, prefix, services=services, lazy=lazy)
+
+    def mount_graphql(
+        self,
+        url: str,
+        prefix: str,
+        operations: Optional[List[str]] = None,
+        default_headers: Optional[Dict[str, str]] = None,
+        transport: Optional[Any] = None,
+    ) -> List[str]:
+        """Mount downstream GraphQL operations as MCP tools via introspection or query stub."""
+        return self.protocols.mount_graphql(
+            url,
+            prefix,
+            operations=operations,
+            default_headers=default_headers,
+            transport=transport,
+        )
 
     def _wrap_scoped_runner(
         self,
