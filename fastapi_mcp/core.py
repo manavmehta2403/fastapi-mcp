@@ -64,6 +64,12 @@ class FastAPIMCP(FastAPI):
         **kwargs: Any,
     ):
         """Initialize FastAPIMCP instance."""
+        if "name" in kwargs:
+            passed_name = kwargs.pop("name")
+            if mcp_name == "FastAPIMCP":
+                mcp_name = passed_name
+            kwargs.setdefault("title", passed_name)
+
         self._target_app = existing_app or self
         self.mcp_name = mcp_name
         self.mcp_server = MCPServer(name=mcp_name, description=mcp_description)

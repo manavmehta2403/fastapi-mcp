@@ -56,6 +56,10 @@ Issues = "https://github.com/manavmehta2403/fastapi-mcp/issues"
 where = ["."]
 include = ["fastapi_mcp*"]
 
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+
 [tool.pylint.main]
 max-line-length = 100
 
