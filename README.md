@@ -1,13 +1,13 @@
 # FastAPI-MCP ⚡🤖
 
 <p align="center">
-  <b>The unified bridge between FastAPI and FastMCP / Model Context Protocol.</b><br>
-  <i>Serve REST APIs and MCP AI Tools simultaneously from a single server with zero resource overhead.</i>
+  <b>The unified bridge between FastAPI and FastMCP: dual and standalone API & MCP gateways.</b><br>
+  <i>Serve REST APIs and MCP AI Tools together in a single event loop, or run decoupled at scale.</i>
 </p>
 
 <p align="center">
   <a href="https://pypi.org/project/fastapi-fastmcp/"><img src="https://img.shields.io/pypi/v/fastapi-fastmcp.svg" alt="PyPI version"></a>
-  <a href="https://pypi.org/project/fastapi-fastmcp/"><img src="https://img.shields.io/badge/version-0.10.0-blue.svg" alt="Version 0.10.0"></a>
+  <a href="https://pypi.org/project/fastapi-fastmcp/"><img src="https://img.shields.io/badge/version-0.11.0-blue.svg" alt="Version 0.11.0"></a>
   <a href="#-key-highlights"><img src="https://img.shields.io/badge/FastAPI-009688?style=flat&logo=fastapi&logoColor=white" alt="FastAPI"></a>
   <a href="#-key-highlights"><img src="https://img.shields.io/badge/MCP-Protocol-blueviolet?style=flat" alt="MCP"></a>
   <a href="#-key-highlights"><img src="https://img.shields.io/badge/Python-3.10+-3776AB?style=flat&logo=python&logoColor=white" alt="Python"></a>
@@ -226,6 +226,10 @@ async def process_refund(invoice_id: str, amount: float):
 # existing_corp_gateway.mount("/ai-gateway", app.as_gateway_subapp())
 ```
 
+### 📂 Runnable Enterprise Architecture Examples:
+* **Unified Dual Component** (`examples/dual_component_unified.py`): REST API + MCP tools coexisting in one process, shared DB pool, in-memory ASGI dispatch, and Pydantic AI export.
+* **Decoupled Individual Components** (`examples/individual_component_decoupled.py`): Standalone Headless MCP-Only Server (`GatewayMode.MCP_ONLY`) paired with a standalone API Gateway subapp with OBO identity delegation and token-bucket 429 rate limiting.
+
 ---
 
 ## 🌊 Streaming Tools (`@app.stream_tool`)
@@ -395,7 +399,7 @@ if __name__ == "__main__":
 
 ## 🤖 FastAPI-MCP Studio (`/mcp/ui`) & Unified Navigation
 
-FastAPI-MCP v0.10.0 introduces a dedicated, world-class developer studio that unifies REST documentation and the Model Context Protocol ecosystem:
+FastAPI-MCP v0.11.0 introduces a dedicated, world-class developer studio that unifies REST documentation and the Model Context Protocol ecosystem:
 
 ### 1. The 3 MCP Primitives in One Workbench
 - 🛠️ **Tools (`@app.api_tool()`, `@app.tool()`)**: Dynamic schema parameter forms, live in-memory execution, latency timing (e.g. `200 OK (34ms)`), formatted output viewer, and 1-click executable client snippets (**Python FastMCP Client**, **cURL JSON-RPC 2.0**, and **TypeScript SDK**).

@@ -49,3 +49,37 @@ async def test_example_pydantic_ai_mesh():
     assert results["mesh_tool_invoked"] is True
     assert results["pydantic_ai_tools_count"] >= 2
     assert results["tool_execution_result"]["id"] == "item_99"
+
+
+@pytest.mark.asyncio
+async def test_example_dual_component_unified():
+    """Verify examples/dual_component_unified.py runs successfully end-to-end."""
+    from examples.dual_component_unified import run_demo  # pylint: disable=import-outside-toplevel
+
+    results = await run_demo()
+    assert results["rest_status"] == 200
+    assert results["rest_title"] == "Enterprise AI Gateway Appliance"
+    assert results["has_catalog_tool"] is True
+    assert results["discount_qualified"] is True
+    assert results["discount_savings"] == 99.80
+    assert results["pydantic_ai_tools_count"] >= 2
+
+
+@pytest.mark.asyncio
+async def test_example_individual_component_decoupled():
+    """Verify examples/individual_component_decoupled.py runs successfully end-to-end."""
+    from examples.individual_component_decoupled import (  # pylint: disable=import-outside-toplevel
+        run_demo,
+    )
+
+    results = await run_demo()
+    assert results["headless_docs_status"] == 404
+    assert results["headless_openapi_status"] == 404
+    assert results["tool_cluster_id"] == "k8s-prod-us-east"
+    assert results["tool_nodes_healthy"] == 18
+    assert results["gateway_pass_status"] == 200
+    assert results["gateway_rate_limited_status"] == 429
+    assert results["has_retry_after_header"] is True
+    assert results["obo_caller_type"] == "ai_agent"
+    assert results["obo_agent_id"] == "autonomous-remediation-bot-9"
+    assert results["obo_is_authenticated"] is True

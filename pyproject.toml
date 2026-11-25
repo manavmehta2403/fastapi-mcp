@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fastapi-fastmcp"
-version = "0.10.0"
-description = "The unified bridge between FastAPI and FastMCP / Model Context Protocol."
+version = "0.11.0"
+description = "The unified bridge between FastAPI and FastMCP: dual and standalone API & MCP gateways."
 readme = "README.md"
 authors = [{ name = "Manav Mehta" }]
 license = { text = "MIT" }

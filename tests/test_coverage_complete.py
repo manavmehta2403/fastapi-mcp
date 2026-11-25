@@ -567,12 +567,12 @@ async def test_version_and_http_query_decorator():
         readme_desc_match = re.search(r'<b>([^<]+)</b>', readme_content)
         readme_desc = readme_desc_match.group(1) if readme_desc_match else None
 
-    assert pyproj_ver == fastapi_mcp.__version__ == ui_ver == readme_ver == "0.10.0"
+    assert pyproj_ver == fastapi_mcp.__version__ == ui_ver == readme_ver == "0.11.0"
     assert (
         fastapi_mcp.__description__
         == pyproj_desc
         == readme_desc
-        == "The unified bridge between FastAPI and FastMCP / Model Context Protocol."
+        == "The unified bridge between FastAPI and FastMCP: dual and standalone API & MCP gateways."
     )
     assert "0.2.0" not in readme_content
 

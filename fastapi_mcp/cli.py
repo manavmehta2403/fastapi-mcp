@@ -73,8 +73,8 @@ def main(args_list: Any = None) -> None:
     parser = argparse.ArgumentParser(
         prog="fastapi-mcp",
         description=(
-            "FastAPI-MCP: The unified bridge between FastAPI and FastMCP / "
-            "Model Context Protocol."
+            "FastAPI-MCP: The unified bridge between FastAPI and FastMCP: "
+            "dual and standalone API & MCP gateways."
         ),
     )
     subparsers = parser.add_subparsers(dest="command", required=True)

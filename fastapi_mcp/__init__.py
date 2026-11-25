@@ -45,8 +45,11 @@ from .webrtc import (
     WebRTCManager,
 )
 
-__version__ = "0.10.0"
-__description__ = "The unified bridge between FastAPI and FastMCP / Model Context Protocol."
+__version__ = "0.11.0"
+__description__ = (
+    "The unified bridge between FastAPI and FastMCP: "
+    "dual and standalone API & MCP gateways."
+)
 
 __all__ = [
     "__version__",
